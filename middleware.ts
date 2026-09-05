@@ -1,9 +1,6 @@
-// Ensure VERCEL_URL always has https protocol before next-auth imports
-if (process.env.VERCEL_URL && !process.env.VERCEL_URL.startsWith('http')) {
-  process.env.VERCEL_URL = `https://${process.env.VERCEL_URL}`;
-}
+// Ensure NEXTAUTH_URL is valid before next-auth imports
 if (!process.env.NEXTAUTH_URL || !process.env.NEXTAUTH_URL.startsWith('http')) {
-  process.env.NEXTAUTH_URL = process.env.VERCEL_URL || 'https://floorplan-ai.vercel.app';
+  process.env.NEXTAUTH_URL = 'https://floorplan-ai.vercel.app';
 }
 
 import { withAuth } from 'next-auth/middleware';

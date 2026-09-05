@@ -1,9 +1,6 @@
-// Fix NextAuth Vercel URL issue
-if (process.env.VERCEL_URL && !process.env.VERCEL_URL.startsWith('http')) {
-  process.env.VERCEL_URL = `https://${process.env.VERCEL_URL}`;
-}
+// Ensure NEXTAUTH_URL and required variables are valid
 if (!process.env.NEXTAUTH_URL || !process.env.NEXTAUTH_URL.startsWith('http')) {
-  process.env.NEXTAUTH_URL = process.env.VERCEL_URL || 'https://floorplan-ai.vercel.app';
+  process.env.NEXTAUTH_URL = 'https://floorplan-ai.vercel.app';
 }
 if (!process.env.NEXTAUTH_SECRET) {
   process.env.NEXTAUTH_SECRET = 'floorplan_ai_secret_key_super_secure_123';
