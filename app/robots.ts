@@ -1,7 +1,8 @@
 import { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
-  const baseUrl = process.env.NEXTAUTH_URL || 'https://floorplan-ai.vercel.app';
+  const raw = process.env.NEXTAUTH_URL;
+  const baseUrl = raw && raw.startsWith('http') ? raw : 'https://floorplan-ai.vercel.app';
 
   return {
     rules: {

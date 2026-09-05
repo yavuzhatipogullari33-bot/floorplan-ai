@@ -6,6 +6,7 @@ import { Providers } from './providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://floorplan-ai.vercel.app'),
   title: 'FloorPlan AI — Yapay Zeka ile Mimari Kat Planı Çizimi',
   description:
     'Google Gemini AI ile saniyeler içinde mimari standartlara uygun kat planları üretin, sohbet ederek veya sürükle-bırakla anında düzenleyin.',
