@@ -1,3 +1,18 @@
+// Ensure environment variables are valid for NextAuth and Vercel build
+if (!process.env.NEXTAUTH_URL || !process.env.NEXTAUTH_URL.startsWith('http')) {
+  if (process.env.VERCEL_URL) {
+    process.env.NEXTAUTH_URL = `https://${process.env.VERCEL_URL}`;
+  } else {
+    process.env.NEXTAUTH_URL = 'https://floorplan-ai.vercel.app';
+  }
+}
+if (!process.env.NEXTAUTH_SECRET) {
+  process.env.NEXTAUTH_SECRET = 'floorplan_ai_secret_key_super_secure_123';
+}
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'file:./dev.db';
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {

@@ -4,6 +4,18 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '@/lib/db';
 import { verifyPassword, hashPassword } from '@/lib/password';
 
+// Sanitize NextAuth environment variables to prevent Invalid URL errors during prerender
+if (!process.env.NEXTAUTH_URL || !process.env.NEXTAUTH_URL.startsWith('http')) {
+  if (process.env.VERCEL_URL) {
+    process.env.NEXTAUTH_URL = `https://${process.env.VERCEL_URL}`;
+  } else {
+    process.env.NEXTAUTH_URL = 'https://floorplan-ai.vercel.app';
+  }
+}
+if (!process.env.NEXTAUTH_SECRET) {
+  process.env.NEXTAUTH_SECRET = 'floorplan_ai_secret_key_super_secure_123';
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     // 1. Standart E-posta & Şifre ile Giriş
