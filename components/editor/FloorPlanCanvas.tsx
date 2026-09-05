@@ -59,6 +59,66 @@ interface DragState {
   initialWindow?: WindowPlacement;
 }
 
+export interface DragFeedback {
+  active: boolean;
+  wall?: string;
+  currentLengthM: string;
+  deltaM: string;
+  roomLabel: string;
+  roomAreaM2: string;
+  neighborLabel?: string;
+  neighborAreaM2?: string;
+  isShared: boolean;
+  hudX: number;
+  hudY: number;
+  guideline?: {
+    orientation: 'vertical' | 'horizontal';
+    val: number;
+  };
+}
+
+/**
+ * Shared wall detection between rooms.
+ * Identifies any rooms sharing a specific wall boundary with a target room.
+ */
+export function findSharedWallNeighbors(
+  target: RoomLayout,
+  wall: 'top' | 'right' | 'bottom' | 'left',
+  allRooms: RoomLayout[],
+  epsilon = 0.35
+): RoomLayout[] {
+  const tLeft = target.x;
+  const tRight = target.x + target.w;
+  const tTop = target.y;
+  const tBottom = target.y + target.h;
+
+  const intervalsOverlap = (a1: number, a2: number, b1: number, b2: number) => {
+    return Math.max(a1, b1) < Math.min(a2, b2) - 0.05;
+  };
+
+  return allRooms.filter((r) => {
+    if (r.id === target.id) return false;
+    const rLeft = r.x;
+    const rRight = r.x + r.w;
+    const rTop = r.y;
+    const rBottom = r.y + r.h;
+
+    if (wall === 'right') {
+      return Math.abs(rLeft - tRight) < epsilon && intervalsOverlap(tTop, tBottom, rTop, rBottom);
+    }
+    if (wall === 'left') {
+      return Math.abs(rRight - tLeft) < epsilon && intervalsOverlap(tTop, tBottom, rTop, rBottom);
+    }
+    if (wall === 'bottom') {
+      return Math.abs(rTop - tBottom) < epsilon && intervalsOverlap(tLeft, tRight, rLeft, rRight);
+    }
+    if (wall === 'top') {
+      return Math.abs(rBottom - tTop) < epsilon && intervalsOverlap(tLeft, tRight, rLeft, rRight);
+    }
+    return false;
+  });
+}
+
 // Pure React JSX Renderers
 function RenderDoorVisual({
   rx,
@@ -222,6 +282,7 @@ export default function FloorPlanCanvas({
   const dragStateRef = useRef<DragState | null>(null);
   const [isDraggingActive, setIsDraggingActive] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [dragFeedback, setDragFeedback] = useState<DragFeedback | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
@@ -310,67 +371,239 @@ export default function FloorPlanCanvas({
       const initial = state.initialRoom;
       if (!initial || !state.initialAllRooms) return;
 
-      // 2. MOVE ROOM (smooth continuous movement)
+      // 2. MOVE ROOM (smooth continuous movement with magnetic docking snap)
       if (state.mode === 'move-room') {
-        const newX = Math.max(0, Number((initial.x + deltaGridX).toFixed(2)));
-        const newY = Math.max(0, Number((initial.y + deltaGridY).toFixed(2)));
+        let newX = Math.max(0, Number((initial.x + deltaGridX).toFixed(2)));
+        let newY = Math.max(0, Number((initial.y + deltaGridY).toFixed(2)));
 
+        // Magnetic docking snap to other rooms
+        const SNAP_DIST = 0.28;
+        let guidelineV: number | undefined = undefined;
+        let guidelineH: number | undefined = undefined;
+
+        for (const other of state.initialAllRooms) {
+          if (other.id === state.roomId) continue;
+
+          // Horizontal docking (flush to left, right, or collinear)
+          if (Math.abs(newX - (other.x + other.w)) < SNAP_DIST) {
+            newX = Number((other.x + other.w).toFixed(2));
+            guidelineV = newX * CELL_SIZE + PADDING;
+          } else if (Math.abs((newX + initial.w) - other.x) < SNAP_DIST) {
+            newX = Number((other.x - initial.w).toFixed(2));
+            guidelineV = other.x * CELL_SIZE + PADDING;
+          } else if (Math.abs(newX - other.x) < SNAP_DIST) {
+            newX = other.x;
+            guidelineV = other.x * CELL_SIZE + PADDING;
+          }
+
+          // Vertical docking (flush to top, bottom, or collinear)
+          if (Math.abs(newY - (other.y + other.h)) < SNAP_DIST) {
+            newY = Number((other.y + other.h).toFixed(2));
+            guidelineH = newY * CELL_SIZE + PADDING;
+          } else if (Math.abs((newY + initial.h) - other.y) < SNAP_DIST) {
+            newY = Number((other.y - initial.h).toFixed(2));
+            guidelineH = other.y * CELL_SIZE + PADDING;
+          } else if (Math.abs(newY - other.y) < SNAP_DIST) {
+            newY = other.y;
+            guidelineH = other.y * CELL_SIZE + PADDING;
+          }
+        }
+
+        const scale = layout?.scale || 1.0;
         setLocalRooms((prev) =>
           prev.map((r) => (r.id === state.roomId ? { ...r, x: newX, y: newY } : r))
         );
+
+        setDragFeedback({
+          active: true,
+          roomLabel: getCleanRoomLabel(initial, language),
+          currentLengthM: `${(initial.w * scale).toFixed(1)}×${(initial.h * scale).toFixed(1)}`,
+          deltaM: `Δ (${((newX - initial.x) * scale).toFixed(1)}m, ${((newY - initial.y) * scale).toFixed(1)}m)`,
+          roomAreaM2: (initial.w * initial.h * scale * scale).toFixed(1),
+          isShared: false,
+          hudX: newX * CELL_SIZE + PADDING + (initial.w * CELL_SIZE) / 2,
+          hudY: newY * CELL_SIZE + PADDING - 10,
+          guideline: guidelineV
+            ? { orientation: 'vertical', val: guidelineV }
+            : guidelineH
+            ? { orientation: 'horizontal', val: guidelineH }
+            : undefined,
+        });
         return;
       }
 
-      // 3. RESIZE ROOM WALLS & ADJACENT ROOMS (Fluid & Shared Wall Topology Solver)
+      // 3. RESIZE ROOM WALLS & SYNCHRONIZED SHARED WALL TOPOLOGY SOLVER
       if (state.mode === 'resize-wall' && state.wall) {
         const wall = state.wall;
-        const EPSILON = 0.35; // Shared wall proximity threshold
-        const MIN_SIZE = 1.0; // Minimum room size in grid units
-
-        let newX = initial.x;
-        let newY = initial.y;
-        let newW = initial.w;
-        let newH = initial.h;
-
-        if (wall === 'right' || wall === 'ne' || wall === 'se') {
-          newW = Math.max(MIN_SIZE, Number((initial.w + deltaGridX).toFixed(2)));
-        }
-        if (wall === 'bottom' || wall === 'se' || wall === 'sw') {
-          newH = Math.max(MIN_SIZE, Number((initial.h + deltaGridY).toFixed(2)));
-        }
-        if (wall === 'left' || wall === 'nw' || wall === 'sw') {
-          const potentialX = Math.max(0, Number((initial.x + deltaGridX).toFixed(2)));
-          const diffX = initial.x - potentialX;
-          if (initial.w + diffX >= MIN_SIZE) {
-            newX = potentialX;
-            newW = Number((initial.w + diffX).toFixed(2));
-          }
-        }
-        if (wall === 'top' || wall === 'nw' || wall === 'ne') {
-          const potentialY = Math.max(0, Number((initial.y + deltaGridY).toFixed(2)));
-          const diffY = initial.y - potentialY;
-          if (initial.h + diffY >= MIN_SIZE) {
-            newY = potentialY;
-            newH = Number((initial.h + diffY).toFixed(2));
-          }
-        }
+        const EPSILON = 0.35; // Proximity threshold to detect shared walls
+        const MIN_SIZE = 1.0; // Minimum room span in grid units
+        const SNAP_THRESHOLD = 0.22; // Alignment snap threshold
+        const scale = layout?.scale || 1.0;
 
         const initLeft = initial.x;
         const initRight = initial.x + initial.w;
         const initTop = initial.y;
         const initBottom = initial.y + initial.h;
 
+        let newX = initial.x;
+        let newY = initial.y;
+        let newW = initial.w;
+        let newH = initial.h;
+
+        let snapGuideline: { orientation: 'vertical' | 'horizontal'; val: number } | undefined = undefined;
+
+        // Interval overlap along an axis
+        const intervalsOverlap = (a1: number, a2: number, b1: number, b2: number) => {
+          return Math.max(a1, b1) < Math.min(a2, b2) - 0.05;
+        };
+
+        // Detect all neighbors sharing this specific boundary
+        const rightNeighbors = (wall === 'right' || wall === 'ne' || wall === 'se')
+          ? state.initialAllRooms.filter(
+              (r) => r.id !== initial.id && Math.abs(r.x - initRight) < EPSILON && intervalsOverlap(initTop, initBottom, r.y, r.y + r.h)
+            )
+          : [];
+
+        const leftNeighbors = (wall === 'left' || wall === 'nw' || wall === 'sw')
+          ? state.initialAllRooms.filter(
+              (r) => r.id !== initial.id && Math.abs((r.x + r.w) - initLeft) < EPSILON && intervalsOverlap(initTop, initBottom, r.y, r.y + r.h)
+            )
+          : [];
+
+        const bottomNeighbors = (wall === 'bottom' || wall === 'se' || wall === 'sw')
+          ? state.initialAllRooms.filter(
+              (r) => r.id !== initial.id && Math.abs(r.y - initBottom) < EPSILON && intervalsOverlap(initLeft, initRight, r.x, r.x + r.w)
+            )
+          : [];
+
+        const topNeighbors = (wall === 'top' || wall === 'nw' || wall === 'ne')
+          ? state.initialAllRooms.filter(
+              (r) => r.id !== initial.id && Math.abs((r.y + r.h) - initTop) < EPSILON && intervalsOverlap(initLeft, initRight, r.x, r.x + r.w)
+            )
+          : [];
+
+        // 1. Right wall moved (expands/contracts horizontally to the right)
+        if (wall === 'right' || wall === 'ne' || wall === 'se') {
+          let targetRight = initial.x + Math.max(MIN_SIZE, initial.w + deltaGridX);
+
+          // Clamped by sharing neighbors so neighbors don't shrink below MIN_SIZE
+          if (rightNeighbors.length > 0) {
+            const maxRight = Math.min(...rightNeighbors.map((n) => n.x + n.w - MIN_SIZE));
+            targetRight = Math.min(targetRight, maxRight);
+          }
+
+          // Alignment snap against all other room vertical wall edges
+          for (const other of state.initialAllRooms) {
+            if (other.id === initial.id || rightNeighbors.some((n) => n.id === other.id)) continue;
+            const edges = [other.x, other.x + other.w];
+            for (const edge of edges) {
+              if (Math.abs(targetRight - edge) < SNAP_THRESHOLD) {
+                targetRight = edge;
+                snapGuideline = { orientation: 'vertical', val: edge * CELL_SIZE + PADDING };
+                break;
+              }
+            }
+            if (snapGuideline) break;
+          }
+
+          newW = Math.max(MIN_SIZE, Number((targetRight - newX).toFixed(2)));
+        }
+
+        // 2. Left wall moved (expands/contracts horizontally to the left)
+        if (wall === 'left' || wall === 'nw' || wall === 'sw') {
+          let targetLeft = initial.x + deltaGridX;
+          targetLeft = Math.min(targetLeft, initial.x + initial.w - MIN_SIZE);
+          targetLeft = Math.max(0, targetLeft);
+
+          // Clamped by sharing neighbors
+          if (leftNeighbors.length > 0) {
+            const minLeft = Math.max(...leftNeighbors.map((n) => n.x + MIN_SIZE));
+            targetLeft = Math.max(targetLeft, minLeft);
+          }
+
+          // Alignment snap against other room edges
+          for (const other of state.initialAllRooms) {
+            if (other.id === initial.id || leftNeighbors.some((n) => n.id === other.id)) continue;
+            const edges = [other.x, other.x + other.w];
+            for (const edge of edges) {
+              if (Math.abs(targetLeft - edge) < SNAP_THRESHOLD) {
+                targetLeft = edge;
+                snapGuideline = { orientation: 'vertical', val: edge * CELL_SIZE + PADDING };
+                break;
+              }
+            }
+            if (snapGuideline) break;
+          }
+
+          const diffX = initial.x - targetLeft;
+          newX = Number(targetLeft.toFixed(2));
+          newW = Number((initial.w + diffX).toFixed(2));
+        }
+
+        // 3. Bottom wall moved (expands/contracts vertically downwards)
+        if (wall === 'bottom' || wall === 'se' || wall === 'sw') {
+          let targetBottom = initial.y + Math.max(MIN_SIZE, initial.h + deltaGridY);
+
+          // Clamped by sharing neighbors
+          if (bottomNeighbors.length > 0) {
+            const maxBottom = Math.min(...bottomNeighbors.map((n) => n.y + n.h - MIN_SIZE));
+            targetBottom = Math.min(targetBottom, maxBottom);
+          }
+
+          // Alignment snap against other room edges
+          for (const other of state.initialAllRooms) {
+            if (other.id === initial.id || bottomNeighbors.some((n) => n.id === other.id)) continue;
+            const edges = [other.y, other.y + other.h];
+            for (const edge of edges) {
+              if (Math.abs(targetBottom - edge) < SNAP_THRESHOLD) {
+                targetBottom = edge;
+                snapGuideline = { orientation: 'horizontal', val: edge * CELL_SIZE + PADDING };
+                break;
+              }
+            }
+            if (snapGuideline) break;
+          }
+
+          newH = Math.max(MIN_SIZE, Number((targetBottom - newY).toFixed(2)));
+        }
+
+        // 4. Top wall moved (expands/contracts vertically upwards)
+        if (wall === 'top' || wall === 'nw' || wall === 'ne') {
+          let targetTop = initial.y + deltaGridY;
+          targetTop = Math.min(targetTop, initial.y + initial.h - MIN_SIZE);
+          targetTop = Math.max(0, targetTop);
+
+          // Clamped by sharing neighbors
+          if (topNeighbors.length > 0) {
+            const minTop = Math.max(...topNeighbors.map((n) => n.y + MIN_SIZE));
+            targetTop = Math.max(targetTop, minTop);
+          }
+
+          // Alignment snap against other room edges
+          for (const other of state.initialAllRooms) {
+            if (other.id === initial.id || topNeighbors.some((n) => n.id === other.id)) continue;
+            const edges = [other.y, other.y + other.h];
+            for (const edge of edges) {
+              if (Math.abs(targetTop - edge) < SNAP_THRESHOLD) {
+                targetTop = edge;
+                snapGuideline = { orientation: 'horizontal', val: edge * CELL_SIZE + PADDING };
+                break;
+              }
+            }
+            if (snapGuideline) break;
+          }
+
+          const diffY = initial.y - targetTop;
+          newY = Number(targetTop.toFixed(2));
+          newH = Number((initial.h + diffY).toFixed(2));
+        }
+
         const currLeft = newX;
         const currRight = newX + newW;
         const currTop = newY;
         const currBottom = newY + newH;
 
-        // Check if two intervals overlap along an axis
-        const intervalsOverlap = (a1: number, a2: number, b1: number, b2: number) => {
-          return Math.max(a1, b1) < Math.min(a2, b2) - 0.05;
-        };
-
-        // Propagate changes to adjacent neighbor rooms
+        // Synchronously propagate boundary changes to sharing neighbors
         const updatedRooms = state.initialAllRooms.map((r) => {
           if (r.id === state.roomId) {
             return { ...r, x: newX, y: newY, w: newW, h: newH };
@@ -381,54 +614,68 @@ export default function FloorPlanCanvas({
           let rw = r.w;
           let rh = r.h;
 
-          const rInitLeft = r.x;
-          const rInitRight = r.x + r.w;
-          const rInitTop = r.y;
-          const rInitBottom = r.y + r.h;
-
-          const overlapsY = intervalsOverlap(initTop, initBottom, rInitTop, rInitBottom);
-          const overlapsX = intervalsOverlap(initLeft, initRight, rInitLeft, rInitRight);
-
-          // 1. Right wall moved -> adjust rooms to the right sharing this boundary
-          if ((wall === 'right' || wall === 'ne' || wall === 'se') && overlapsY) {
-            if (Math.abs(rInitLeft - initRight) < EPSILON) {
-              const newNeighborX = currRight;
-              const newNeighborW = Math.max(MIN_SIZE, rInitRight - newNeighborX);
-              rx = Number(newNeighborX.toFixed(2));
-              rw = Number(newNeighborW.toFixed(2));
-            }
+          // Right neighbor: its left wall moves with currRight
+          if (rightNeighbors.some((n) => n.id === r.id)) {
+            const newNeighborW = Math.max(MIN_SIZE, (r.x + r.w) - currRight);
+            rx = Number(currRight.toFixed(2));
+            rw = Number(newNeighborW.toFixed(2));
           }
 
-          // 2. Left wall moved -> adjust rooms to the left sharing this boundary
-          if ((wall === 'left' || wall === 'nw' || wall === 'sw') && overlapsY) {
-            if (Math.abs(rInitRight - initLeft) < EPSILON) {
-              const newNeighborW = Math.max(MIN_SIZE, currLeft - rInitLeft);
-              rw = Number(newNeighborW.toFixed(2));
-            }
+          // Left neighbor: its right wall moves with currLeft
+          if (leftNeighbors.some((n) => n.id === r.id)) {
+            const newNeighborW = Math.max(MIN_SIZE, currLeft - r.x);
+            rw = Number(newNeighborW.toFixed(2));
           }
 
-          // 3. Bottom wall moved -> adjust rooms below sharing this boundary
-          if ((wall === 'bottom' || wall === 'se' || wall === 'sw') && overlapsX) {
-            if (Math.abs(rInitTop - initBottom) < EPSILON) {
-              const newNeighborY = currBottom;
-              const newNeighborH = Math.max(MIN_SIZE, rInitBottom - newNeighborY);
-              ry = Number(newNeighborY.toFixed(2));
-              rh = Number(newNeighborH.toFixed(2));
-            }
+          // Bottom neighbor: its top wall moves with currBottom
+          if (bottomNeighbors.some((n) => n.id === r.id)) {
+            const newNeighborH = Math.max(MIN_SIZE, (r.y + r.h) - currBottom);
+            ry = Number(currBottom.toFixed(2));
+            rh = Number(newNeighborH.toFixed(2));
           }
 
-          // 4. Top wall moved -> adjust rooms above sharing this boundary
-          if ((wall === 'top' || wall === 'nw' || wall === 'ne') && overlapsX) {
-            if (Math.abs(rInitBottom - initTop) < EPSILON) {
-              const newNeighborH = Math.max(MIN_SIZE, currTop - rInitTop);
-              rh = Number(newNeighborH.toFixed(2));
-            }
+          // Top neighbor: its bottom wall moves with currTop
+          if (topNeighbors.some((n) => n.id === r.id)) {
+            const newNeighborH = Math.max(MIN_SIZE, currTop - r.y);
+            rh = Number(newNeighborH.toFixed(2));
           }
 
           return { ...r, x: rx, y: ry, w: rw, h: rh };
         });
 
         setLocalRooms(updatedRooms);
+
+        // Calculate live CAD measurement HUD feedback
+        const allNeighbors = [...rightNeighbors, ...leftNeighbors, ...bottomNeighbors, ...topNeighbors];
+        const isHoriz = wall === 'top' || wall === 'bottom';
+        const currentLenM = ((isHoriz ? newW : newH) * scale).toFixed(2);
+        const initLenM = ((isHoriz ? initial.w : initial.h) * scale);
+        const deltaVal = Number(currentLenM) - initLenM;
+        const deltaStr = deltaVal >= 0 ? `+${deltaVal.toFixed(2)}` : deltaVal.toFixed(2);
+
+        const primaryNeighbor = allNeighbors[0];
+        const primaryNeighborUpdated = primaryNeighbor ? updatedRooms.find((r) => r.id === primaryNeighbor.id) : undefined;
+
+        setDragFeedback({
+          active: true,
+          wall,
+          roomLabel: getCleanRoomLabel(initial, language),
+          currentLengthM: currentLenM,
+          deltaM: deltaStr,
+          roomAreaM2: (newW * newH * scale * scale).toFixed(1),
+          neighborLabel: primaryNeighbor ? getCleanRoomLabel(primaryNeighbor, language) : undefined,
+          neighborAreaM2: primaryNeighborUpdated
+            ? (primaryNeighborUpdated.w * primaryNeighborUpdated.h * scale * scale).toFixed(1)
+            : undefined,
+          isShared: allNeighbors.length > 0,
+          hudX: (currLeft + newW / 2) * CELL_SIZE + PADDING,
+          hudY: wall === 'top'
+            ? currTop * CELL_SIZE + PADDING - 24
+            : wall === 'bottom'
+            ? currBottom * CELL_SIZE + PADDING + 32
+            : (currTop + newH / 2) * CELL_SIZE + PADDING,
+          guideline: snapGuideline,
+        });
         return;
       }
 
@@ -531,6 +778,7 @@ export default function FloorPlanCanvas({
         dragStateRef.current = null;
         setIsDraggingActive(false);
         setIsPanning(false);
+        setDragFeedback(null);
 
         if (!wasPan) {
           // Commit final layout to parent
@@ -1141,147 +1389,457 @@ export default function FloorPlanCanvas({
                       );
                     })}
 
-                    {/* Selected Room - Direct Wall Line & Corner Handles */}
-                    {isSelected && (
-                      <g>
-                        {/* Top Wall Line Drag Zone */}
-                        <line
-                          x1={rx}
-                          y1={ry}
-                          x2={rx + rw}
-                          y2={ry}
-                          stroke="transparent"
-                          strokeWidth={16}
-                          className="cursor-ns-resize"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'top', e)}
-                        />
-                        <line
-                          x1={rx}
-                          y1={ry}
-                          x2={rx + rw}
-                          y2={ry}
-                          stroke="#10B981"
-                          strokeWidth={2.5}
-                          strokeDasharray="4,3"
-                          className="pointer-events-none"
-                        />
+                    {/* Selected Room - Direct Wall Line, Tactile Midpoint Grips & Corner Handles */}
+                    {isSelected && (() => {
+                      const topNeighbors = findSharedWallNeighbors(room, 'top', localRooms);
+                      const bottomNeighbors = findSharedWallNeighbors(room, 'bottom', localRooms);
+                      const leftNeighbors = findSharedWallNeighbors(room, 'left', localRooms);
+                      const rightNeighbors = findSharedWallNeighbors(room, 'right', localRooms);
 
-                        {/* Bottom Wall Line Drag Zone */}
-                        <line
-                          x1={rx}
-                          y1={ry + rh}
-                          x2={rx + rw}
-                          y2={ry + rh}
-                          stroke="transparent"
-                          strokeWidth={16}
-                          className="cursor-ns-resize"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'bottom', e)}
-                        />
-                        <line
-                          x1={rx}
-                          y1={ry + rh}
-                          x2={rx + rw}
-                          y2={ry + rh}
-                          stroke="#10B981"
-                          strokeWidth={2.5}
-                          strokeDasharray="4,3"
-                          className="pointer-events-none"
-                        />
+                      const isTopShared = topNeighbors.length > 0;
+                      const isBottomShared = bottomNeighbors.length > 0;
+                      const isLeftShared = leftNeighbors.length > 0;
+                      const isRightShared = rightNeighbors.length > 0;
 
-                        {/* Left Wall Line Drag Zone */}
-                        <line
-                          x1={rx}
-                          y1={ry}
-                          x2={rx}
-                          y2={ry + rh}
-                          stroke="transparent"
-                          strokeWidth={16}
-                          className="cursor-ew-resize"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'left', e)}
-                        />
-                        <line
-                          x1={rx}
-                          y1={ry}
-                          x2={rx}
-                          y2={ry + rh}
-                          stroke="#10B981"
-                          strokeWidth={2.5}
-                          strokeDasharray="4,3"
-                          className="pointer-events-none"
-                        />
+                      return (
+                        <g>
+                          {/* Top Wall: Line & Tactile Midpoint Grip Pill */}
+                          <line
+                            x1={rx}
+                            y1={ry}
+                            x2={rx + rw}
+                            y2={ry}
+                            stroke="transparent"
+                            strokeWidth={18}
+                            className="cursor-ns-resize"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'top', e)}
+                          />
+                          <line
+                            x1={rx}
+                            y1={ry}
+                            x2={rx + rw}
+                            y2={ry}
+                            stroke={isTopShared ? '#4F46E5' : '#059669'}
+                            strokeWidth={2.5}
+                            strokeDasharray={isTopShared ? '5,3' : '4,3'}
+                            className="pointer-events-none"
+                          />
+                          {/* Top Midpoint Grip Pill */}
+                          <g
+                            transform={`translate(${rx + rw / 2}, ${ry})`}
+                            className="cursor-ns-resize filter drop-shadow hover:scale-125 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'top', e)}
+                          >
+                            <rect
+                              x={-22}
+                              y={-6.5}
+                              width={44}
+                              height={13}
+                              rx={6.5}
+                              fill={isTopShared ? '#EEF2FF' : '#ECFDF5'}
+                              stroke={isTopShared ? '#4F46E5' : '#059669'}
+                              strokeWidth={1.8}
+                            />
+                            {/* Grip Ribs */}
+                            <line x1={-6} y1={-3.5} x2={-6} y2={3.5} stroke={isTopShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={0} y1={-3.5} x2={0} y2={3.5} stroke={isTopShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={6} y1={-3.5} x2={6} y2={3.5} stroke={isTopShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            {isTopShared && (
+                              <circle cx={-15} cy={0} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            {isTopShared && (
+                              <circle cx={15} cy={0} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            <title>{isTopShared ? 'Ortak Duvar (Senkronize Boyutlandırma)' : 'Dış Duvar'}</title>
+                          </g>
 
-                        {/* Right Wall Line Drag Zone */}
-                        <line
-                          x1={rx + rw}
-                          y1={ry}
-                          x2={rx + rw}
-                          y2={ry + rh}
-                          stroke="transparent"
-                          strokeWidth={16}
-                          className="cursor-ew-resize"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'right', e)}
-                        />
-                        <line
-                          x1={rx + rw}
-                          y1={ry}
-                          x2={rx + rw}
-                          y2={ry + rh}
-                          stroke="#10B981"
-                          strokeWidth={2.5}
-                          strokeDasharray="4,3"
-                          className="pointer-events-none"
-                        />
+                          {/* Bottom Wall: Line & Tactile Midpoint Grip Pill */}
+                          <line
+                            x1={rx}
+                            y1={ry + rh}
+                            x2={rx + rw}
+                            y2={ry + rh}
+                            stroke="transparent"
+                            strokeWidth={18}
+                            className="cursor-ns-resize"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'bottom', e)}
+                          />
+                          <line
+                            x1={rx}
+                            y1={ry + rh}
+                            x2={rx + rw}
+                            y2={ry + rh}
+                            stroke={isBottomShared ? '#4F46E5' : '#059669'}
+                            strokeWidth={2.5}
+                            strokeDasharray={isBottomShared ? '5,3' : '4,3'}
+                            className="pointer-events-none"
+                          />
+                          {/* Bottom Midpoint Grip Pill */}
+                          <g
+                            transform={`translate(${rx + rw / 2}, ${ry + rh})`}
+                            className="cursor-ns-resize filter drop-shadow hover:scale-125 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'bottom', e)}
+                          >
+                            <rect
+                              x={-22}
+                              y={-6.5}
+                              width={44}
+                              height={13}
+                              rx={6.5}
+                              fill={isBottomShared ? '#EEF2FF' : '#ECFDF5'}
+                              stroke={isBottomShared ? '#4F46E5' : '#059669'}
+                              strokeWidth={1.8}
+                            />
+                            {/* Grip Ribs */}
+                            <line x1={-6} y1={-3.5} x2={-6} y2={3.5} stroke={isBottomShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={0} y1={-3.5} x2={0} y2={3.5} stroke={isBottomShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={6} y1={-3.5} x2={6} y2={3.5} stroke={isBottomShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            {isBottomShared && (
+                              <circle cx={-15} cy={0} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            {isBottomShared && (
+                              <circle cx={15} cy={0} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            <title>{isBottomShared ? 'Ortak Duvar (Senkronize Boyutlandırma)' : 'Dış Duvar'}</title>
+                          </g>
 
-                        {/* 4 Corner Precision Handles */}
-                        {/* NW */}
-                        <circle
-                          cx={rx}
-                          cy={ry}
-                          r={7.5}
-                          fill="#FFFFFF"
-                          stroke="#059669"
-                          strokeWidth={3}
-                          className="cursor-nwse-resize filter drop-shadow hover:scale-130 transition-transform"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'nw', e)}
-                        />
-                        {/* NE */}
-                        <circle
-                          cx={rx + rw}
-                          cy={ry}
-                          r={7.5}
-                          fill="#FFFFFF"
-                          stroke="#059669"
-                          strokeWidth={3}
-                          className="cursor-nesw-resize filter drop-shadow hover:scale-130 transition-transform"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'ne', e)}
-                        />
-                        {/* SE */}
-                        <circle
-                          cx={rx + rw}
-                          cy={ry + rh}
-                          r={7.5}
-                          fill="#FFFFFF"
-                          stroke="#059669"
-                          strokeWidth={3}
-                          className="cursor-nwse-resize filter drop-shadow hover:scale-130 transition-transform"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'se', e)}
-                        />
-                        {/* SW */}
-                        <circle
-                          cx={rx}
-                          cy={ry + rh}
-                          r={7.5}
-                          fill="#FFFFFF"
-                          stroke="#059669"
-                          strokeWidth={3}
-                          className="cursor-nesw-resize filter drop-shadow hover:scale-130 transition-transform"
-                          onMouseDown={(e) => handleMouseDownOnWall(room.id, 'sw', e)}
-                        />
-                      </g>
-                    )}
+                          {/* Left Wall: Line & Tactile Midpoint Grip Pill */}
+                          <line
+                            x1={rx}
+                            y1={ry}
+                            x2={rx}
+                            y2={ry + rh}
+                            stroke="transparent"
+                            strokeWidth={18}
+                            className="cursor-ew-resize"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'left', e)}
+                          />
+                          <line
+                            x1={rx}
+                            y1={ry}
+                            x2={rx}
+                            y2={ry + rh}
+                            stroke={isLeftShared ? '#4F46E5' : '#059669'}
+                            strokeWidth={2.5}
+                            strokeDasharray={isLeftShared ? '5,3' : '4,3'}
+                            className="pointer-events-none"
+                          />
+                          {/* Left Midpoint Grip Pill */}
+                          <g
+                            transform={`translate(${rx}, ${ry + rh / 2})`}
+                            className="cursor-ew-resize filter drop-shadow hover:scale-125 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'left', e)}
+                          >
+                            <rect
+                              x={-6.5}
+                              y={-22}
+                              width={13}
+                              height={44}
+                              rx={6.5}
+                              fill={isLeftShared ? '#EEF2FF' : '#ECFDF5'}
+                              stroke={isLeftShared ? '#4F46E5' : '#059669'}
+                              strokeWidth={1.8}
+                            />
+                            {/* Grip Ribs */}
+                            <line x1={-3.5} y1={-6} x2={3.5} y2={-6} stroke={isLeftShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={-3.5} y1={0} x2={3.5} y2={0} stroke={isLeftShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={-3.5} y1={6} x2={3.5} y2={6} stroke={isLeftShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            {isLeftShared && (
+                              <circle cx={0} cy={-15} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            {isLeftShared && (
+                              <circle cx={0} cy={15} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            <title>{isLeftShared ? 'Ortak Duvar (Senkronize Boyutlandırma)' : 'Dış Duvar'}</title>
+                          </g>
+
+                          {/* Right Wall: Line & Tactile Midpoint Grip Pill */}
+                          <line
+                            x1={rx + rw}
+                            y1={ry}
+                            x2={rx + rw}
+                            y2={ry + rh}
+                            stroke="transparent"
+                            strokeWidth={18}
+                            className="cursor-ew-resize"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'right', e)}
+                          />
+                          <line
+                            x1={rx + rw}
+                            y1={ry}
+                            x2={rx + rw}
+                            y2={ry + rh}
+                            stroke={isRightShared ? '#4F46E5' : '#059669'}
+                            strokeWidth={2.5}
+                            strokeDasharray={isRightShared ? '5,3' : '4,3'}
+                            className="pointer-events-none"
+                          />
+                          {/* Right Midpoint Grip Pill */}
+                          <g
+                            transform={`translate(${rx + rw}, ${ry + rh / 2})`}
+                            className="cursor-ew-resize filter drop-shadow hover:scale-125 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'right', e)}
+                          >
+                            <rect
+                              x={-6.5}
+                              y={-22}
+                              width={13}
+                              height={44}
+                              rx={6.5}
+                              fill={isRightShared ? '#EEF2FF' : '#ECFDF5'}
+                              stroke={isRightShared ? '#4F46E5' : '#059669'}
+                              strokeWidth={1.8}
+                            />
+                            {/* Grip Ribs */}
+                            <line x1={-3.5} y1={-6} x2={3.5} y2={-6} stroke={isRightShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={-3.5} y1={0} x2={3.5} y2={0} stroke={isRightShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            <line x1={-3.5} y1={6} x2={3.5} y2={6} stroke={isRightShared ? '#4F46E5' : '#059669'} strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                            {isRightShared && (
+                              <circle cx={0} cy={-15} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            {isRightShared && (
+                              <circle cx={0} cy={15} r={2} fill="#4F46E5" className="pointer-events-none" />
+                            )}
+                            <title>{isRightShared ? 'Ortak Duvar (Senkronize Boyutlandırma)' : 'Dış Duvar'}</title>
+                          </g>
+
+                          {/* 4 Precision Dual-Concentric Corner Handles */}
+                          {/* NW */}
+                          <g
+                            className="cursor-nwse-resize filter drop-shadow hover:scale-130 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'nw', e)}
+                          >
+                            <circle cx={rx} cy={ry} r={8} fill="#FFFFFF" stroke="#059669" strokeWidth={2.5} />
+                            <circle cx={rx} cy={ry} r={3} fill="#059669" />
+                          </g>
+                          {/* NE */}
+                          <g
+                            className="cursor-nesw-resize filter drop-shadow hover:scale-130 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'ne', e)}
+                          >
+                            <circle cx={rx + rw} cy={ry} r={8} fill="#FFFFFF" stroke="#059669" strokeWidth={2.5} />
+                            <circle cx={rx + rw} cy={ry} r={3} fill="#059669" />
+                          </g>
+                          {/* SE */}
+                          <g
+                            className="cursor-nwse-resize filter drop-shadow hover:scale-130 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'se', e)}
+                          >
+                            <circle cx={rx + rw} cy={ry + rh} r={8} fill="#FFFFFF" stroke="#059669" strokeWidth={2.5} />
+                            <circle cx={rx + rw} cy={ry + rh} r={3} fill="#059669" />
+                          </g>
+                          {/* SW */}
+                          <g
+                            className="cursor-nesw-resize filter drop-shadow hover:scale-130 transition-transform"
+                            onMouseDown={(e) => handleMouseDownOnWall(room.id, 'sw', e)}
+                          >
+                            <circle cx={rx} cy={ry + rh} r={8} fill="#FFFFFF" stroke="#059669" strokeWidth={2.5} />
+                            <circle cx={rx} cy={ry + rh} r={3} fill="#059669" />
+                          </g>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })}
+
+              {/* Laser Alignment Guideline (Cyan CAD Laser) */}
+              {dragFeedback?.guideline && (
+                <g className="pointer-events-none">
+                  {dragFeedback.guideline.orientation === 'vertical' ? (
+                    <>
+                      <line
+                        x1={dragFeedback.guideline.val}
+                        y1={0}
+                        x2={dragFeedback.guideline.val}
+                        y2={svgHeight}
+                        stroke="#06B6D4"
+                        strokeWidth={1.8}
+                        strokeDasharray="6,4"
+                      />
+                      <rect
+                        x={dragFeedback.guideline.val - 22}
+                        y={PADDING - 20}
+                        width={44}
+                        height={16}
+                        rx={4}
+                        fill="#06B6D4"
+                      />
+                      <text
+                        x={dragFeedback.guideline.val}
+                        y={PADDING - 8}
+                        textAnchor="middle"
+                        fill="#FFFFFF"
+                        fontSize="9"
+                        fontWeight="bold"
+                        fontFamily="monospace"
+                      >
+                        SNAP
+                      </text>
+                    </>
+                  ) : (
+                    <>
+                      <line
+                        x1={0}
+                        y1={dragFeedback.guideline.val}
+                        x2={svgWidth}
+                        y2={dragFeedback.guideline.val}
+                        stroke="#06B6D4"
+                        strokeWidth={1.8}
+                        strokeDasharray="6,4"
+                      />
+                      <rect
+                        x={PADDING - 28}
+                        y={dragFeedback.guideline.val - 8}
+                        width={44}
+                        height={16}
+                        rx={4}
+                        fill="#06B6D4"
+                      />
+                      <text
+                        x={PADDING - 6}
+                        y={dragFeedback.guideline.val + 4}
+                        textAnchor="middle"
+                        fill="#FFFFFF"
+                        fontSize="9"
+                        fontWeight="bold"
+                        fontFamily="monospace"
+                      >
+                        SNAP
+                      </text>
+                    </>
+                  )}
+                </g>
+              )}
+
+              {/* Synchronized Neighbor Highlight Glow */}
+              {dragFeedback?.active && dragFeedback.isShared && dragFeedback.neighborLabel && (() => {
+                const neighborRoom = localRooms.find((r) => getCleanRoomLabel(r, language) === dragFeedback.neighborLabel);
+                if (!neighborRoom) return null;
+                const nrx = neighborRoom.x * CELL_SIZE + PADDING;
+                const nry = neighborRoom.y * CELL_SIZE + PADDING;
+                const nrw = neighborRoom.w * CELL_SIZE;
+                const nrh = neighborRoom.h * CELL_SIZE;
+                return (
+                  <g className="pointer-events-none animate-pulse">
+                    <rect
+                      x={nrx - 3}
+                      y={nry - 3}
+                      width={nrw + 6}
+                      height={nrh + 6}
+                      fill="#6366F1"
+                      fillOpacity={0.08}
+                      stroke="#6366F1"
+                      strokeWidth={2.5}
+                      strokeDasharray="6,4"
+                      rx={6}
+                    />
+                    <g transform={`translate(${nrx + nrw / 2}, ${nry + nrh / 2})`}>
+                      <rect
+                        x={-56}
+                        y={-12}
+                        width={112}
+                        height={24}
+                        rx={12}
+                        fill="#4F46E5"
+                        fillOpacity={0.92}
+                      />
+                      <text
+                        x={0}
+                        y={4}
+                        textAnchor="middle"
+                        fill="#FFFFFF"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fontFamily="Inter, system-ui"
+                      >
+                        🔗 Senkronize
+                      </text>
+                    </g>
+                  </g>
+                );
+              })()}
+
+              {/* Floating Live CAD Measurement HUD Badge */}
+              {dragFeedback?.active && (
+                <g
+                  className="pointer-events-none filter drop-shadow-xl"
+                  transform={`translate(${Math.max(120, Math.min(svgWidth - 120, dragFeedback.hudX))}, ${Math.max(45, Math.min(svgHeight - 45, dragFeedback.hudY))})`}
+                >
+                  <rect
+                    x={-110}
+                    y={dragFeedback.isShared ? -42 : -32}
+                    width={220}
+                    height={dragFeedback.isShared ? 84 : 64}
+                    rx={10}
+                    fill="#0F172A"
+                    fillOpacity={0.94}
+                    stroke={dragFeedback.isShared ? '#818CF8' : '#38BDF8'}
+                    strokeWidth={1.6}
+                  />
+
+                  {/* Header: Length & Delta */}
+                  <text
+                    x={0}
+                    y={dragFeedback.isShared ? -22 : -13}
+                    textAnchor="middle"
+                    fill="#F8FAFC"
+                    fontSize="13"
+                    fontWeight="bold"
+                    fontFamily="Inter, system-ui, sans-serif"
+                  >
+                    <tspan fill={dragFeedback.isShared ? '#A5B4FC' : '#38BDF8'}>
+                      {dragFeedback.currentLengthM}m
+                    </tspan>
+                    <tspan fill="#94A3B8" fontSize="11"> | </tspan>
+                    <tspan fill={dragFeedback.deltaM.startsWith('+') ? '#34D399' : '#FBBF24'} fontSize="11" fontWeight="600">
+                      {dragFeedback.deltaM}
+                    </tspan>
+                  </text>
+
+                  {/* Primary Room Area */}
+                  <text
+                    x={0}
+                    y={dragFeedback.isShared ? -4 : 4}
+                    textAnchor="middle"
+                    fill="#CBD5E1"
+                    fontSize="11"
+                    fontFamily="Inter, system-ui, sans-serif"
+                  >
+                    <tspan fontWeight="bold" fill="#F1F5F9">{dragFeedback.roomLabel}: </tspan>
+                    <tspan fill="#67E8F9" fontWeight="600">{dragFeedback.roomAreaM2} m²</tspan>
+                  </text>
+
+                  {/* Shared Synchronized Neighbor Row */}
+                  {dragFeedback.isShared && dragFeedback.neighborLabel && (
+                    <text
+                      x={0}
+                      y={16}
+                      textAnchor="middle"
+                      fill="#C7D2FE"
+                      fontSize="10.5"
+                      fontWeight="600"
+                      fontFamily="Inter, system-ui, sans-serif"
+                    >
+                      🔗 {dragFeedback.neighborLabel}: <tspan fill="#A5B4FC">{dragFeedback.neighborAreaM2} m²</tspan>
+                    </text>
+                  )}
+
+                  {/* Status Footer */}
+                  <text
+                    x={0}
+                    y={dragFeedback.isShared ? 32 : 20}
+                    textAnchor="middle"
+                    fill={dragFeedback.isShared ? '#818CF8' : '#64748B'}
+                    fontSize="9"
+                    fontWeight="bold"
+                    letterSpacing="0.5"
+                    fontFamily="Inter, system-ui, sans-serif"
+                  >
+                    {dragFeedback.isShared ? 'ORTAK DUVAR SENKRONİZASYONU' : 'CAD ÖLÇEK KİLİTLİ'}
+                  </text>
+                </g>
+              )}
 
               {/* Compass */}
               <text
