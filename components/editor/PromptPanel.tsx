@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Sparkles, Loader2, Home, Bath, Maximize2, ChevronDown } from 'lucide-react';
+import { Sparkles, Loader2, Home, Bath, Maximize2, ChevronDown, LayoutDashboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import ShapeSelectorModal, { type FootprintShape, type ShapeSelection } from '@/components/editor/ShapeSelectorModal';
 
 export interface GenerateParams {
   description: string;
@@ -12,6 +13,11 @@ export interface GenerateParams {
   totalArea: number;
   style: string;
   extras: string[];
+  footprintShape?: FootprintShape;
+  footprintRotation?: number;
+  footprintFlipH?: boolean;
+  footprintFlipV?: boolean;
+  doorWall?: string;
 }
 
 interface PromptPanelProps {
@@ -103,6 +109,8 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
   const [style, setStyle] = useState('modern');
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
   const [showExtras, setShowExtras] = useState(false);
+  const [showShapeModal, setShowShapeModal] = useState(false);
+  const [shapeSelection, setShapeSelection] = useState<ShapeSelection | null>(null);
 
   function toggleExtra(extra: string) {
     setSelectedExtras((prev) =>
@@ -110,9 +118,25 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
     );
   }
 
+  function handleShapeConfirm(sel: ShapeSelection) {
+    setShapeSelection(sel);
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onGenerate({ description, bedrooms, bathrooms, totalArea, style, extras: selectedExtras });
+    onGenerate({
+      description,
+      bedrooms,
+      bathrooms,
+      totalArea,
+      style,
+      extras: selectedExtras,
+      footprintShape: shapeSelection?.shape,
+      footprintRotation: shapeSelection?.rotation,
+      footprintFlipH: shapeSelection?.flipH,
+      footprintFlipV: shapeSelection?.flipV,
+      doorWall: shapeSelection?.doorWall,
+    });
   }
 
   return (
@@ -297,6 +321,39 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
           )}
         </div>
 
+        {/* Shape Selector Button */}
+        <button
+          type="button"
+          onClick={() => setShowShapeModal(true)}
+          className={cn(
+            'w-full py-2.5 px-3 rounded-xl border text-sm font-medium transition-all flex items-center gap-2',
+            shapeSelection
+              ? 'bg-blue-50 border-blue-400 text-blue-700 hover:bg-blue-100'
+              : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50/50'
+          )}
+        >
+          <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1 text-left">
+            {shapeSelection
+              ? `📐 ${
+                  shapeSelection.shape === 'rectangle' ? 'Dikdörtgen' :
+                  shapeSelection.shape === 'l-shape' ? 'L-Şekli' :
+                  shapeSelection.shape === 'u-shape' ? 'U-Şekli' :
+                  shapeSelection.shape === 't-shape' ? 'T-Şekli' :
+                  shapeSelection.shape === 'h-shape' ? 'H-Şekli' :
+                  shapeSelection.shape === 'cross' ? 'Artı/Çarpı' :
+                  shapeSelection.shape === 'l-indented' ? 'Girintili L' :
+                  'Kademeli'
+                } — ${totalArea} m²`
+              : language === 'tr' ? '📐 Şekil Seçin (Bina Ayak İzi)' : '📐 Choose Building Shape'}
+          </span>
+          {shapeSelection && (
+            <span className="text-[10px] bg-blue-200 text-blue-800 rounded-full px-2 py-0.5 font-semibold">
+              Seçildi
+            </span>
+          )}
+        </button>
+
         {/* Generate Button */}
         <button
           type="submit"
@@ -316,6 +373,14 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
           )}
         </button>
       </form>
+
+      {/* Shape Selector Modal */}
+      <ShapeSelectorModal
+        isOpen={showShapeModal}
+        onClose={() => setShowShapeModal(false)}
+        onConfirm={handleShapeConfirm}
+        totalArea={totalArea}
+      />
     </div>
   );
 }
