@@ -110,17 +110,26 @@ export function parseArchitecturalPrompt(description: string = '', style: string
 }
 
 /**
+ * Accurately calculates meters per grid unit so that the sum of all room areas
+ * matches the user's requested totalArea precisely (Neufert precision).
+ */
+export function calculatePreciseScale(rooms: RoomLayout[], targetArea: number): number {
+  const totalGridUnits = rooms.reduce((acc, r) => acc + (r.w * r.h), 0);
+  if (totalGridUnits <= 0) return 1.0;
+  return Math.sqrt(targetArea / totalGridUnits);
+}
+
+/**
  * 1. L-SHAPED VILLA PLAN (L-Tipi Manzara & Bahçe Villası)
  * Gündüz kanadı (Salon + Mutfak) ile gece kanadı (Yatak odaları) 90° L formunda birleşir.
  * İç köşede geniş bir peyzaj/havuz terası yer alır.
  */
 export function generateLShapedPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { bedrooms = 3, totalArea = 160, lang = 'tr' } = opts;
+  const { bedrooms = 3, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 16;
   const gridH = 12;
-  const scale = Number((Math.sqrt(totalArea / 110)).toFixed(2));
 
   // Horizontal Wing (Top - Living & Entertaining)
   rooms.push({
@@ -248,6 +257,8 @@ export function generateLShapedPlan(opts: CreativeGenerateOptions): FloorPlanLay
     doors: [{ wall: 'top', position: 0.3, width: 28 }, { wall: 'left', position: 0.5, width: 24 }],
   });
 
+  const scale = calculatePreciseScale(rooms, totalArea);
+
   return {
     rooms,
     totalArea,
@@ -262,12 +273,11 @@ export function generateLShapedPlan(opts: CreativeGenerateOptions): FloorPlanLay
  * Ortasında korunaklı huzurlu bir iç avlu (atrium/havuz) ve çevresinde cam koridorlarla bağlı 3 kanat.
  */
 export function generateCourtyardPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { bedrooms = 3, totalArea = 220, lang = 'tr' } = opts;
+  const { bedrooms = 3, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 16;
   const gridH = 11;
-  const scale = Number((Math.sqrt(totalArea / 130)).toFixed(2));
 
   // Left Wing: Social Living Wing
   rooms.push({
@@ -381,6 +391,8 @@ export function generateCourtyardPlan(opts: CreativeGenerateOptions): FloorPlanL
     windows: [{ wall: 'bottom', position: 0.5, width: 32 }, { wall: 'right', position: 0.5, width: 32 }],
   });
 
+  const scale = calculatePreciseScale(rooms, totalArea);
+
   return {
     rooms,
     totalArea,
@@ -395,12 +407,11 @@ export function generateCourtyardPlan(opts: CreativeGenerateOptions): FloorPlanL
  * Bölme duvarların minimum olduğu, yüksek ferahlık, ada tezgah ve bütünleşik yaşam kurgusu.
  */
 export function generateLoftPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { totalArea = 110, lang = 'tr' } = opts;
+  const { bedrooms = 1, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 14;
   const gridH = 9;
-  const scale = Number((Math.sqrt(totalArea / 90)).toFixed(2));
 
   // Grand Open Great Room (Salon + Yemek + Galeri)
   rooms.push({
@@ -480,6 +491,8 @@ export function generateLoftPlan(opts: CreativeGenerateOptions): FloorPlanLayout
     windows: [{ wall: 'bottom', position: 0.5, width: 28 }, { wall: 'right', position: 0.5, width: 28 }],
   });
 
+  const scale = calculatePreciseScale(rooms, totalArea);
+
   return {
     rooms,
     totalArea,
@@ -494,12 +507,11 @@ export function generateLoftPlan(opts: CreativeGenerateOptions): FloorPlanLayout
  * Merkezde görkemli sofa (yaşam ve toplanma salonu), dört köşede bağımsız ferah köşk odalar.
  */
 export function generateSofaliPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { totalArea = 180, lang = 'tr' } = opts;
+  const { bedrooms = 4, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 15;
   const gridH = 11;
-  const scale = Number((Math.sqrt(totalArea / 125)).toFixed(2));
 
   // Top-Left: Baş Oda (Master Room)
   rooms.push({
@@ -598,6 +610,8 @@ export function generateSofaliPlan(opts: CreativeGenerateOptions): FloorPlanLayo
     windows: [{ wall: 'bottom', position: 0.5, width: 36 }, { wall: 'right', position: 0.5, width: 36 }],
   });
 
+  const scale = calculatePreciseScale(rooms, totalArea);
+
   return {
     rooms,
     totalArea,
@@ -612,12 +626,11 @@ export function generateSofaliPlan(opts: CreativeGenerateOptions): FloorPlanLayo
  * Gölgeli geniş verandalar, açık hava mutfağı bağlantısı, ferah çapraz havalandırma.
  */
 export function generateMediterraneanPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { bedrooms = 3, totalArea = 190, lang = 'tr' } = opts;
+  const { bedrooms = 3, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 15;
   const gridH = 10;
-  const scale = Number((Math.sqrt(totalArea / 115)).toFixed(2));
 
   // Salon - High ceiling stone fireplace living
   rooms.push({
@@ -726,6 +739,8 @@ export function generateMediterraneanPlan(opts: CreativeGenerateOptions): FloorP
     windows: [{ wall: 'bottom', position: 0.5, width: 30 }, { wall: 'right', position: 0.5, width: 30 }],
   });
 
+  const scale = calculatePreciseScale(rooms, totalArea);
+
   return {
     rooms,
     totalArea,
@@ -739,12 +754,11 @@ export function generateMediterraneanPlan(opts: CreativeGenerateOptions): FloorP
  * 6. PENTHOUSE / PANORAMIC RESIDENCE (Çepeçevre Teraslı Çatı Dubleksi/Rezidans)
  */
 export function generatePenthousePlan(opts: CreativeGenerateOptions): FloorPlanLayout {
-  const { totalArea = 240, lang = 'tr' } = opts;
+  const { bedrooms = 3, totalArea = 120, lang = 'tr' } = opts;
   const rooms: RoomLayout[] = [];
 
   const gridW = 16;
   const gridH = 11;
-  const scale = Number((Math.sqrt(totalArea / 130)).toFixed(2));
 
   // Wraparound Top Terrace
   rooms.push({
@@ -876,6 +890,8 @@ export function generatePenthousePlan(opts: CreativeGenerateOptions): FloorPlanL
     doors: [{ wall: 'left', position: 0.5, width: 22 }],
     windows: [{ wall: 'right', position: 0.5, width: 22 }, { wall: 'bottom', position: 0.5, width: 22 }],
   });
+
+  const scale = calculatePreciseScale(rooms, totalArea);
 
   return {
     rooms,

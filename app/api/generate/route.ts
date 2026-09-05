@@ -44,8 +44,6 @@ function generateArchitecturalLayout(params: {
     gridH = 10;
   }
 
-  const scale = Number((Math.sqrt(totalArea / (gridW * gridH))).toFixed(2));
-
   // -------------------------------------------------------------
   // TYPOLOGY 1: 1+1 COMPACT & OPEN PLAN
   // -------------------------------------------------------------
@@ -500,6 +498,9 @@ function generateArchitecturalLayout(params: {
     gridH += 1.5;
   }
 
+  const totalGrid = rooms.reduce((sum, r) => sum + r.w * r.h, 0);
+  const scale = totalGrid > 0 ? Math.sqrt(totalArea / totalGrid) : 1.0;
+
   return {
     rooms,
     totalArea,
@@ -560,6 +561,11 @@ Apply all Neufert standards, circulation corridors, wet wall groupings, and wind
             ...r,
             label: getCleanRoomLabel(r, targetLang),
           }));
+          const totalGrid = parsed.rooms.reduce((sum: number, r: RoomLayout) => sum + (r.w * r.h), 0);
+          if (totalGrid > 0) {
+            parsed.scale = Math.sqrt(Number(totalArea) / totalGrid);
+            parsed.totalArea = Number(totalArea);
+          }
           layoutJson = parsed;
         }
       } catch (geminiError) {

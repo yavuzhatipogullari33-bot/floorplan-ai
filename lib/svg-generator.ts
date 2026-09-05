@@ -356,13 +356,21 @@ function renderDimensionLines(layout: FloorPlanLayout): string {
   const { rooms, gridWidth, gridHeight, scale } = layout;
   let dims = '';
 
-  const totalWidthM = (gridWidth * scale).toFixed(2);
-  const totalHeightM = (gridHeight * scale).toFixed(2);
+  const minX = rooms.length > 0 ? Math.min(...rooms.map(r => r.x)) : 0;
+  const maxX = rooms.length > 0 ? Math.max(...rooms.map(r => r.x + r.w)) : gridWidth;
+  const minY = rooms.length > 0 ? Math.min(...rooms.map(r => r.y)) : 0;
+  const maxY = rooms.length > 0 ? Math.max(...rooms.map(r => r.y + r.h)) : gridHeight;
 
-  const startX = PADDING;
-  const startY = PADDING;
-  const planW = gridWidth * CELL_SIZE;
-  const planH = gridHeight * CELL_SIZE;
+  const buildingW = maxX - minX;
+  const buildingH = maxY - minY;
+
+  const totalWidthM = (buildingW * scale).toFixed(2);
+  const totalHeightM = (buildingH * scale).toFixed(2);
+
+  const startX = PADDING + minX * CELL_SIZE;
+  const startY = PADDING + minY * CELL_SIZE;
+  const planW = buildingW * CELL_SIZE;
+  const planH = buildingH * CELL_SIZE;
 
   // Top overall dimension line
   const topDimY = PADDING - 24;
@@ -418,6 +426,8 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     const height = room.h * CELL_SIZE;
     const colors = ROOM_COLORS[room.type] ?? ROOM_COLORS.hallway;
     const areaM2 = (room.w * room.h * scale * scale).toFixed(1);
+    const roomWM = (room.w * scale).toFixed(1);
+    const roomHM = (room.h * scale).toFixed(1);
     const displayLabel = getCleanRoomLabel(room, lang);
 
     // Double-line architectural wall representation
@@ -468,11 +478,11 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
       <!-- Architectural Room Stamp -->
       <g class="room-stamp" pointer-events="none">
         <rect
-          x="${cx - 48}" y="${cy - 12}"
-          width="96" height="26"
+          x="${cx - 54}" y="${cy - 12}"
+          width="108" height="26"
           rx="5"
           fill="#FFFFFF"
-          fill-opacity="0.92"
+          fill-opacity="0.94"
           stroke="#CBD5E1"
           stroke-width="0.8"
         />
@@ -480,7 +490,7 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
           x="${cx}" y="${cy}"
           text-anchor="middle"
           font-family="Inter, system-ui, sans-serif"
-          font-size="10.5"
+          font-size="10"
           font-weight="700"
           letter-spacing="-0.01em"
           fill="#0F172A"
@@ -489,10 +499,10 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
           x="${cx}" y="${cy + 10}"
           text-anchor="middle"
           font-family="Inter, system-ui, sans-serif"
-          font-size="8.5"
+          font-size="8"
           font-weight="600"
           fill="${colors.accent}"
-        >${areaM2} m²</text>
+        >${areaM2} m² (${roomWM}×${roomHM}m)</text>
       </g>`;
   }
 
@@ -517,12 +527,12 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
   const titleBlock = `
     <!-- Architectural Title Block / Pafta Rozeti -->
     <g transform="translate(${scaleX}, ${scaleY - 10})">
-      <rect x="-4" y="-22" width="220" height="28" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+      <rect x="-4" y="-22" width="240" height="28" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
       <text x="6" y="-6" font-family="Inter, system-ui, sans-serif" font-size="9" font-weight="700" fill="#0F172A">
         ${lang === 'tr' ? 'MİMARİ KAT PLANI' : 'ARCHITECTURAL FLOOR PLAN'}
       </text>
-      <text x="130" y="-6" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="600" fill="#64748B">
-        Ölçek: 1:${Math.round(100 / scale)} | ${layout.totalArea} m²
+      <text x="135" y="-6" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="600" fill="#64748B">
+        ${lang === 'tr' ? 'Net Alan:' : 'Total:'} ${layout.totalArea} m² | 1:${Math.round(100 / scale)}
       </text>
       <!-- Metric Scale Bar -->
       <line x1="0" y1="0" x2="${scaleBarWidth}" y2="0" stroke="#0F172A" stroke-width="2"/>

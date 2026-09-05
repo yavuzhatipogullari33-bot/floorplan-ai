@@ -50,7 +50,6 @@ const CREATIVE_PRESETS = [
     promptEn: 'L-shaped luxury pool villa with wide patio and master suite',
     beds: 3,
     baths: 2,
-    area: 160,
     style: 'modern',
   },
   {
@@ -61,7 +60,6 @@ const CREATIVE_PRESETS = [
     promptEn: 'U-shaped Mediterranean stone villa with central atrium and pergola',
     beds: 3,
     baths: 2,
-    area: 150,
     style: 'mediterranean',
   },
   {
@@ -72,7 +70,6 @@ const CREATIVE_PRESETS = [
     promptEn: 'Industrial open-concept loft with kitchen island and work studio',
     beds: 1,
     baths: 1,
-    area: 90,
     style: 'open-plan',
   },
   {
@@ -83,7 +80,6 @@ const CREATIVE_PRESETS = [
     promptEn: 'Traditional Turkish mansion with central sofa hall and bay windows',
     beds: 4,
     baths: 2,
-    area: 180,
     style: 'traditional',
   },
   {
@@ -94,7 +90,6 @@ const CREATIVE_PRESETS = [
     promptEn: 'Panoramic sky terrace penthouse residence with walk-in closet',
     beds: 3,
     baths: 3,
-    area: 200,
     style: 'modern',
   },
 ];
@@ -160,7 +155,6 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
                     setDescription(language === 'tr' ? p.promptTr : p.promptEn);
                     setBedrooms(p.beds);
                     setBathrooms(p.baths);
-                    setTotalArea(p.area);
                     setStyle(p.style);
                   }}
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-slate-100 hover:bg-green-50 hover:text-green-700 hover:border-green-200 border border-slate-200 text-gray-700 transition-all text-left"
