@@ -12,7 +12,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <SessionProvider session={isClient ? undefined : null}>
+    <SessionProvider basePath="/api/auth" session={isClient ? undefined : null}>
       <LanguageProvider>
         {children}
       </LanguageProvider>
