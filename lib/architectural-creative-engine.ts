@@ -903,6 +903,178 @@ export function generatePenthousePlan(opts: CreativeGenerateOptions): FloorPlanL
 }
 
 /**
+ * 7. T-SHAPED PLAN (T-Tipi Ana Kanat + Merkez Stem)
+ * Üstte geniş yatay sosyal alan, alta doğru uzanan tek özel oda kanadı.
+ */
+export function generateTShapedPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
+  const { bedrooms = 3, totalArea = 120, lang = 'tr' } = opts;
+  const rooms: RoomLayout[] = [];
+  const gridW = 14;
+  const gridH = 13;
+
+  // Top horizontal bar: social wing
+  rooms.push({ id: 'living', label: lang === 'tr' ? 'Geniş Salon' : 'Grand Living', type: 'living', x: 0, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'right', position: 0.5, width: 26 }, { wall: 'bottom', position: 0.5, width: 26 }],
+    windows: [{ wall: 'top', position: 0.5, width: 44 }, { wall: 'left', position: 0.5, width: 36 }] });
+  rooms.push({ id: 'dining', label: lang === 'tr' ? 'Yemek Odası' : 'Dining', type: 'dining', x: 5, y: 0, w: 4, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }, { wall: 'right', position: 0.5, width: 24 }],
+    windows: [{ wall: 'top', position: 0.5, width: 32 }] });
+  rooms.push({ id: 'kitchen', label: lang === 'tr' ? 'Mutfak' : 'Kitchen', type: 'kitchen', x: 9, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }, { wall: 'bottom', position: 0.5, width: 24 }],
+    windows: [{ wall: 'top', position: 0.5, width: 32 }, { wall: 'right', position: 0.5, width: 28 }] });
+
+  // Central stem: foyer + bedrooms downward
+  rooms.push({ id: 'foyer', label: lang === 'tr' ? 'Giriş' : 'Entry', type: 'hallway', x: 5, y: 5, w: 4, h: 2,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }, { wall: 'bottom', position: 0.5, width: 24 }] });
+  rooms.push({ id: 'bath-1', label: lang === 'tr' ? 'Banyo' : 'Bathroom', type: 'bathroom', x: 4, y: 5, w: 1, h: 2,
+    doors: [{ wall: 'right', position: 0.5, width: 22 }], windows: [{ wall: 'left', position: 0.5, width: 16 }] });
+  rooms.push({ id: 'master-bed', label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Suite', type: 'bedroom', x: 4, y: 7, w: 6, h: 6,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }],
+    windows: [{ wall: 'bottom', position: 0.5, width: 44 }, { wall: 'left', position: 0.5, width: 36 }] });
+  if (bedrooms >= 2) rooms.push({ id: 'bed-2', label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2', type: 'bedroom', x: 0, y: 5, w: 4, h: 4,
+    doors: [{ wall: 'right', position: 0.5, width: 24 }], windows: [{ wall: 'left', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 28 }] });
+  if (bedrooms >= 3) rooms.push({ id: 'bed-3', label: lang === 'tr' ? 'Yatak Odası 3' : 'Bedroom 3', type: 'bedroom', x: 10, y: 5, w: 4, h: 4,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }], windows: [{ wall: 'right', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 28 }] });
+
+  const scale = calculatePreciseScale(rooms, totalArea);
+  return { rooms, totalArea, gridWidth: gridW, gridHeight: gridH, scale };
+}
+
+/**
+ * 8. H-SHAPED PLAN (H-Tipi İki Kanatlı Büyük Konut)
+ * İki paralel oda kanadı arasında merkezi bir köprü koridor.
+ */
+export function generateHShapedPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
+  const { bedrooms = 4, totalArea = 150, lang = 'tr' } = opts;
+  const rooms: RoomLayout[] = [];
+  const gridW = 16;
+  const gridH = 14;
+
+  // Left wing: social
+  rooms.push({ id: 'living', label: lang === 'tr' ? 'Ana Salon' : 'Main Living', type: 'living', x: 0, y: 0, w: 5, h: 6,
+    doors: [{ wall: 'right', position: 0.5, width: 28 }, { wall: 'bottom', position: 0.5, width: 26 }],
+    windows: [{ wall: 'left', position: 0.5, width: 44 }, { wall: 'top', position: 0.5, width: 36 }] });
+  rooms.push({ id: 'kitchen', label: lang === 'tr' ? 'Mutfak & Yemek' : 'Kitchen & Dining', type: 'kitchen', x: 0, y: 6, w: 5, h: 4,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }, { wall: 'right', position: 0.5, width: 24 }],
+    windows: [{ wall: 'left', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 32 }] });
+
+  // Bridge corridor
+  rooms.push({ id: 'bridge', label: lang === 'tr' ? 'Koridor' : 'Bridge Corridor', type: 'hallway', x: 5, y: 4, w: 6, h: 4,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }, { wall: 'right', position: 0.5, width: 24 }] });
+  rooms.push({ id: 'bath-main', label: lang === 'tr' ? 'Ortak Banyo' : 'Main Bath', type: 'bathroom', x: 5, y: 8, w: 3, h: 2.5,
+    doors: [{ wall: 'top', position: 0.5, width: 22 }], windows: [{ wall: 'bottom', position: 0.5, width: 18 }] });
+  rooms.push({ id: 'laundry', label: lang === 'tr' ? 'Çamaşır Odası' : 'Laundry', type: 'laundry', x: 8, y: 8, w: 3, h: 2.5,
+    doors: [{ wall: 'top', position: 0.5, width: 22 }] });
+
+  // Right wing: bedrooms
+  rooms.push({ id: 'master-bed', label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Suite', type: 'bedroom', x: 11, y: 0, w: 5, h: 6,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }],
+    windows: [{ wall: 'right', position: 0.5, width: 44 }, { wall: 'top', position: 0.5, width: 36 }] });
+  rooms.push({ id: 'bath-ensuite', label: lang === 'tr' ? 'Ebeveyn Banyosu' : 'En-suite', type: 'bathroom', x: 11, y: 6, w: 2.5, h: 2.5,
+    doors: [{ wall: 'top', position: 0.5, width: 22 }] });
+  if (bedrooms >= 2) rooms.push({ id: 'bed-2', label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2', type: 'bedroom', x: 13.5, y: 6, w: 2.5, h: 4,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }], windows: [{ wall: 'right', position: 0.5, width: 28 }, { wall: 'bottom', position: 0.5, width: 24 }] });
+  if (bedrooms >= 3) rooms.push({ id: 'bed-3', label: lang === 'tr' ? 'Yatak Odası 3' : 'Bedroom 3', type: 'bedroom', x: 0, y: 10, w: 5, h: 4,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }], windows: [{ wall: 'left', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 28 }] });
+  if (bedrooms >= 4) rooms.push({ id: 'bed-4', label: lang === 'tr' ? 'Misafir Odası' : 'Guest Room', type: 'bedroom', x: 11, y: 10, w: 5, h: 4,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }], windows: [{ wall: 'right', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 28 }] });
+
+  const scale = calculatePreciseScale(rooms, totalArea);
+  return { rooms, totalArea, gridWidth: gridW, gridHeight: gridH, scale };
+}
+
+/**
+ * 9. CROSS/PLUS SHAPED PLAN (Artı/Çarpı Formlu Plan)
+ * Merkezi bir hub'dan 4 yöne uzanan kanatlar: Kuzey=Giriş, Güney=Yatak, Batı=Salon, Doğu=Servis.
+ */
+export function generateCrossShapedPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
+  const { bedrooms = 3, totalArea = 130, lang = 'tr' } = opts;
+  const rooms: RoomLayout[] = [];
+  const gridW = 15;
+  const gridH = 15;
+
+  // Central hub
+  rooms.push({ id: 'hub', label: lang === 'tr' ? 'Merkez Hol' : 'Central Hub', type: 'hallway', x: 5, y: 5, w: 5, h: 5,
+    doors: [{ wall: 'top', position: 0.5, width: 26 }, { wall: 'bottom', position: 0.5, width: 26 }, { wall: 'left', position: 0.5, width: 26 }, { wall: 'right', position: 0.5, width: 26 }] });
+
+  // North wing: Entry + Guest
+  rooms.push({ id: 'entry', label: lang === 'tr' ? 'Ana Giriş' : 'Main Entry', type: 'hallway', x: 5, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'top', position: 0.5, width: 30 }, { wall: 'bottom', position: 0.5, width: 24 }],
+    windows: [{ wall: 'top', position: 0.3, width: 36 }] });
+
+  // South wing: Bedrooms
+  rooms.push({ id: 'master-bed', label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Suite', type: 'bedroom', x: 5, y: 10, w: 5, h: 5,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }],
+    windows: [{ wall: 'bottom', position: 0.5, width: 44 }] });
+
+  // West wing: Living + Dining
+  rooms.push({ id: 'living', label: lang === 'tr' ? 'Salon' : 'Living Room', type: 'living', x: 0, y: 5, w: 5, h: 5,
+    doors: [{ wall: 'right', position: 0.5, width: 26 }],
+    windows: [{ wall: 'left', position: 0.5, width: 40 }, { wall: 'top', position: 0.5, width: 32 }] });
+
+  // East wing: Kitchen + Service
+  rooms.push({ id: 'kitchen', label: lang === 'tr' ? 'Mutfak' : 'Kitchen', type: 'kitchen', x: 10, y: 5, w: 5, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }],
+    windows: [{ wall: 'right', position: 0.5, width: 36 }, { wall: 'top', position: 0.5, width: 28 }] });
+
+  rooms.push({ id: 'bath-1', label: lang === 'tr' ? 'Banyo' : 'Bathroom', type: 'bathroom', x: 5, y: 5, w: 2, h: 2,
+    doors: [{ wall: 'bottom', position: 0.5, width: 22 }] });
+
+  if (bedrooms >= 2) rooms.push({ id: 'bed-2', label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2', type: 'bedroom', x: 0, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'right', position: 0.5, width: 24 }], windows: [{ wall: 'left', position: 0.5, width: 32 }, { wall: 'top', position: 0.5, width: 28 }] });
+  if (bedrooms >= 3) rooms.push({ id: 'bed-3', label: lang === 'tr' ? 'Yatak Odası 3' : 'Bedroom 3', type: 'bedroom', x: 10, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }], windows: [{ wall: 'right', position: 0.5, width: 32 }, { wall: 'top', position: 0.5, width: 28 }] });
+
+  const scale = calculatePreciseScale(rooms, totalArea);
+  return { rooms, totalArea, gridWidth: gridW, gridHeight: gridH, scale };
+}
+
+/**
+ * 10. STEPPED/KADEMELI PLAN (Kademeli Basamaklı Şelale Formu)
+ * Her katman bir öncekine göre sağa ve öne doğru kayar — basamak terasa dönüşür.
+ */
+export function generateSteppedPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
+  const { bedrooms = 3, totalArea = 130, lang = 'tr' } = opts;
+  const rooms: RoomLayout[] = [];
+  const gridW = 14;
+  const gridH = 13;
+
+  // Step 1: Top-left block (private bedrooms)
+  rooms.push({ id: 'master-bed', label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Suite', type: 'bedroom', x: 0, y: 0, w: 5, h: 5,
+    doors: [{ wall: 'bottom', position: 0.5, width: 24 }, { wall: 'right', position: 0.5, width: 24 }],
+    windows: [{ wall: 'left', position: 0.5, width: 38 }, { wall: 'top', position: 0.5, width: 38 }] });
+  rooms.push({ id: 'bath-ensuite', label: lang === 'tr' ? 'Ebeveyn Banyosu' : 'En-suite', type: 'bathroom', x: 5, y: 0, w: 2.5, h: 2.5,
+    doors: [{ wall: 'left', position: 0.5, width: 22 }], windows: [{ wall: 'top', position: 0.5, width: 16 }] });
+
+  // Step 2: Middle block (entry + social)
+  rooms.push({ id: 'foyer', label: lang === 'tr' ? 'Giriş Holü' : 'Entry Hall', type: 'hallway', x: 0, y: 5, w: 3, h: 2.5,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }, { wall: 'right', position: 0.5, width: 24 }, { wall: 'bottom', position: 0.5, width: 26 }] });
+  rooms.push({ id: 'living', label: lang === 'tr' ? 'Oturma Odası' : 'Living Room', type: 'living', x: 3, y: 3, w: 6, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 26 }, { wall: 'right', position: 0.5, width: 26 }],
+    windows: [{ wall: 'top', position: 0.5, width: 40 }, { wall: 'right', position: 0.5, width: 36 }] });
+  rooms.push({ id: 'terrace-1', label: lang === 'tr' ? 'Kademeli Teras 1' : 'Step Terrace 1', type: 'balcony', x: 5, y: 0, w: 4, h: 3,
+    doors: [{ wall: 'bottom', position: 0.5, width: 28 }] });
+
+  // Step 3: Lower-right block (kitchen + dining)
+  rooms.push({ id: 'kitchen', label: lang === 'tr' ? 'Mutfak' : 'Kitchen', type: 'kitchen', x: 9, y: 3, w: 5, h: 5,
+    doors: [{ wall: 'left', position: 0.5, width: 24 }, { wall: 'bottom', position: 0.5, width: 24 }],
+    windows: [{ wall: 'right', position: 0.5, width: 36 }, { wall: 'top', position: 0.5, width: 30 }] });
+  rooms.push({ id: 'terrace-2', label: lang === 'tr' ? 'Kademeli Teras 2' : 'Step Terrace 2', type: 'balcony', x: 9, y: 0, w: 5, h: 3,
+    doors: [{ wall: 'bottom', position: 0.5, width: 28 }] });
+
+  // Bottom: bedrooms + bath
+  if (bedrooms >= 2) rooms.push({ id: 'bed-2', label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2', type: 'bedroom', x: 0, y: 7.5, w: 4.5, h: 5.5,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }], windows: [{ wall: 'left', position: 0.5, width: 32 }, { wall: 'bottom', position: 0.5, width: 32 }] });
+  if (bedrooms >= 3) rooms.push({ id: 'bed-3', label: lang === 'tr' ? 'Yatak Odası 3' : 'Bedroom 3', type: 'bedroom', x: 4.5, y: 8, w: 4.5, h: 5,
+    doors: [{ wall: 'top', position: 0.5, width: 24 }], windows: [{ wall: 'bottom', position: 0.5, width: 32 }] });
+  rooms.push({ id: 'bath-1', label: lang === 'tr' ? 'Banyo' : 'Bathroom', type: 'bathroom', x: 9, y: 8, w: 3, h: 2.5,
+    doors: [{ wall: 'left', position: 0.5, width: 22 }], windows: [{ wall: 'bottom', position: 0.5, width: 18 }] });
+
+  const scale = calculatePreciseScale(rooms, totalArea);
+  return { rooms, totalArea, gridWidth: gridW, gridHeight: gridH, scale };
+}
+
+/**
  * MASTER CREATIVE ENGINE DISPATCHER
  * Kullanıcının yazdığı serbest açıklamayı (prompt) ve seçtiği stili derinlemesine analiz eder;
  * en uygun yaratıcı mimari formu seçer veya rastgele yaratıcı varyasyonlar üretir.
@@ -910,6 +1082,24 @@ export function generatePenthousePlan(opts: CreativeGenerateOptions): FloorPlanL
 export function generateCreativeFloorPlan(opts: CreativeGenerateOptions): FloorPlanLayout {
   const { description = '', style = '' } = opts;
   const analysis = parseArchitecturalPrompt(description, style);
+  const lowerDesc = `${description} ${style}`.toLowerCase();
+
+  // Shape-selector driven routing — detect injected shape keywords
+  if (lowerDesc.includes('h şeklinde') || lowerDesc.includes('h-şekli') || lowerDesc.includes('iki kanatlı')) {
+    return generateHShapedPlan(opts);
+  }
+  if (lowerDesc.includes('t şeklinde') || lowerDesc.includes('t-şekli')) {
+    return generateTShapedPlan(opts);
+  }
+  if (lowerDesc.includes('artı') || lowerDesc.includes('çapraz formunda') || lowerDesc.includes('cross')) {
+    return generateCrossShapedPlan(opts);
+  }
+  if (lowerDesc.includes('kademeli') || lowerDesc.includes('basamaklı') || lowerDesc.includes('stepped')) {
+    return generateSteppedPlan(opts);
+  }
+  if (lowerDesc.includes('girintili l') || lowerDesc.includes('asimetrik')) {
+    return generateLShapedPlan(opts);
+  }
 
   // 1. If user explicitly mentions L-shape
   if (analysis.isLShape) {
@@ -950,6 +1140,8 @@ export function generateCreativeFloorPlan(opts: CreativeGenerateOptions): FloorP
     generateLoftPlan,
     generatePenthousePlan,
     generateSofaliPlan,
+    generateTShapedPlan,
+    generateHShapedPlan,
   ];
 
   // Use timestamp XOR random jitter to guarantee distinct variations on back-to-back clicks

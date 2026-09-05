@@ -524,10 +524,27 @@ export async function POST(req: NextRequest) {
       style = 'modern',
       extras = [],
       language = 'tr',
+      footprintShape,
+      doorWall,
     } = body;
 
     let layoutJson: FloorPlanLayout | null = null;
     const targetLang = (language as 'tr' | 'en') || 'tr';
+
+    // Inject shape keyword into description so prompt parser picks it up
+    const shapeKeyword: Record<string, string> = {
+      'rectangle': '',
+      'l-shape': 'L şeklinde',
+      'u-shape': 'U şeklinde avlu iç avlulu',
+      't-shape': 'T şeklinde',
+      'h-shape': 'H şeklinde iki kanatlı büyük',
+      'cross': 'artı çapraz formunda',
+      'l-indented': 'girintili L asimetrik',
+      'stepped': 'kademeli basamaklı',
+    };
+    const enhancedDescription = footprintShape && shapeKeyword[footprintShape]
+      ? `${shapeKeyword[footprintShape]} ${description || ''}`.trim()
+      : (description || '');
 
     // 1. Try Google Gemini AI with deep architectural system prompt
     if (hasRealApiKey && genAI) {
@@ -576,7 +593,7 @@ Apply all Neufert standards, circulation corridors, wet wall groupings, and wind
     // 2. Creative Procedural Architectural Engine (Prompt-driven & Dynamic Variation)
     if (!layoutJson) {
       layoutJson = generateCreativeFloorPlan({
-        description: description || '',
+        description: enhancedDescription,
         bedrooms: Number(bedrooms),
         bathrooms: Number(bathrooms),
         totalArea: Number(totalArea),
