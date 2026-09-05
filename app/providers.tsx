@@ -1,21 +1,19 @@
 'use client';
 
-import { SessionProvider } from 'next-auth/react';
+import dynamic from 'next/dynamic';
 import { LanguageProvider } from '@/context/LanguageContext';
-import { useState, useEffect } from 'react';
+
+const DynamicSessionProvider = dynamic(
+  () => import('next-auth/react').then((mod) => mod.SessionProvider),
+  { ssr: false }
+);
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
   return (
-    <SessionProvider basePath="/api/auth" session={isClient ? undefined : null}>
+    <DynamicSessionProvider>
       <LanguageProvider>
         {children}
       </LanguageProvider>
-    </SessionProvider>
+    </DynamicSessionProvider>
   );
 }
