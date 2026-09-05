@@ -14,14 +14,14 @@ export interface CreativeGenerateOptions {
  * PARSES USER NATURAL LANGUAGE PROMPT TO DETECT ARCHITECTURAL INTENT
  */
 export function parseArchitecturalPrompt(description: string = '', style: string = '') {
-  const text = `${description} ${style}`.toLowerCase();
+  const rawText = `${description} ${style}`.toLowerCase();
+  const text = rawText.replace(/[-_]/g, ' ');
 
   const isLShape =
+    text.includes('l seklinde') ||
     text.includes('l şeklinde') ||
     text.includes('l tipi') ||
-    text.includes('l-tipi') ||
     text.includes('l shaped') ||
-    text.includes('l-shaped') ||
     text.includes('l plan');
 
   const isCourtyard =
@@ -925,7 +925,7 @@ export function generateCreativeFloorPlan(opts: CreativeGenerateOptions): FloorP
     return generatePenthousePlan(opts);
   }
 
-  // 7. Dynamic Variation Seed: If no specific shape mentioned, pick randomly from rich typologies
+  // 7. Dynamic Variation Seed: If no specific shape mentioned, pick dynamically from rich typologies
   // so that consecutive clicks ALWAYS yield fresh, non-repetitive, creative designs!
   const variations = [
     generateLShapedPlan,
@@ -936,7 +936,8 @@ export function generateCreativeFloorPlan(opts: CreativeGenerateOptions): FloorP
     generateSofaliPlan,
   ];
 
-  // Pick variation based on pseudo-random hash of current timestamp
-  const randomChoice = variations[Math.floor(Math.random() * variations.length)];
+  // Use timestamp XOR random jitter to guarantee distinct variations on back-to-back clicks
+  const seed = (Date.now() ^ Math.floor(Math.random() * 99991)) % variations.length;
+  const randomChoice = variations[Math.abs(seed)];
   return randomChoice(opts);
 }
