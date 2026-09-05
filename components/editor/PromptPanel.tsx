@@ -41,8 +41,66 @@ const EXTRA_KEYS = [
   'Sunroom',
 ] as const;
 
+const CREATIVE_PRESETS = [
+  {
+    icon: '🏡',
+    titleTr: 'L-Tipi Villa',
+    titleEn: 'L-Shaped Villa',
+    promptTr: 'L şeklinde havuzlu lüks villa, geniş bahçe terası ve ebeveyn süiti',
+    promptEn: 'L-shaped luxury pool villa with wide patio and master suite',
+    beds: 3,
+    baths: 2,
+    area: 160,
+    style: 'modern',
+  },
+  {
+    icon: '🌿',
+    titleTr: 'İç Avlulu Akdeniz',
+    titleEn: 'Courtyard Villa',
+    promptTr: 'U şeklinde iç avlulu Akdeniz taş evi, gölgeli veranda ve atrium',
+    promptEn: 'U-shaped Mediterranean stone villa with central atrium and pergola',
+    beds: 3,
+    baths: 2,
+    area: 150,
+    style: 'mediterranean',
+  },
+  {
+    icon: '🏙️',
+    titleTr: 'Endüstriyel Loft',
+    titleEn: 'Industrial Loft',
+    promptTr: 'Endüstriyel açık plan loft stüdyo, ada mutfak ve çalışma alanı',
+    promptEn: 'Industrial open-concept loft with kitchen island and work studio',
+    beds: 1,
+    baths: 1,
+    area: 90,
+    style: 'open-plan',
+  },
+  {
+    icon: '🏛️',
+    titleTr: 'Geleneksel Konak',
+    titleEn: 'Traditional Mansion',
+    promptTr: 'Geleneksel karnıyarık sofalı Türk evi, eyvan ve ahşap cumba',
+    promptEn: 'Traditional Turkish mansion with central sofa hall and bay windows',
+    beds: 4,
+    baths: 2,
+    area: 180,
+    style: 'traditional',
+  },
+  {
+    icon: '🌲',
+    titleTr: 'Teraslı Penthouse',
+    titleEn: 'Sky Penthouse',
+    promptTr: 'Panoramik çatı teraslı penthouse rezidans, giyinme odası ve şömine',
+    promptEn: 'Panoramic sky terrace penthouse residence with walk-in closet',
+    beds: 3,
+    baths: 3,
+    area: 200,
+    style: 'modern',
+  },
+];
+
 export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [description, setDescription] = useState('');
   const [bedrooms, setBedrooms] = useState(3);
   const [bathrooms, setBathrooms] = useState(2);
@@ -72,15 +130,48 @@ export default function PromptPanel({ onGenerate, isGenerating }: PromptPanelPro
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {/* Description */}
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1.5 block">
-            {t.editor.descriptionLabel}
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-medium text-gray-600 block">
+              {t.editor.descriptionLabel}
+            </label>
+            <span className="text-[10px] text-green-700 font-semibold bg-green-50 px-1.5 py-0.5 rounded border border-green-200">
+              {language === 'tr' ? 'Neufert Mimari AI' : 'Neufert AI Engine'}
+            </span>
+          </div>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t.editor.descriptionPlaceholder}
-            className="input resize-none h-24 text-xs"
+            className="input resize-none h-20 text-xs"
           />
+
+          {/* Creative Typology Chips */}
+          <div className="mt-2">
+            <div className="text-[11px] font-medium text-gray-500 mb-1.5 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-amber-500" />
+              <span>{language === 'tr' ? 'Yaratıcı Mimari Şablonlar:' : 'Creative Typologies:'}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {CREATIVE_PRESETS.map((p, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setDescription(language === 'tr' ? p.promptTr : p.promptEn);
+                    setBedrooms(p.beds);
+                    setBathrooms(p.baths);
+                    setTotalArea(p.area);
+                    setStyle(p.style);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-slate-100 hover:bg-green-50 hover:text-green-700 hover:border-green-200 border border-slate-200 text-gray-700 transition-all text-left"
+                  title={language === 'tr' ? p.promptTr : p.promptEn}
+                >
+                  <span>{p.icon}</span>
+                  <span>{language === 'tr' ? p.titleTr : p.titleEn}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Bedrooms & Bathrooms */}

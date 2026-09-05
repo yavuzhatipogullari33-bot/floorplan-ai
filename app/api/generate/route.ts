@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { genAI, MODEL, hasRealApiKey } from '@/lib/gemini';
 import { generateSVG, FloorPlanLayout, RoomLayout, getCleanRoomLabel } from '@/lib/svg-generator';
 import { ARCHITECTURAL_AI_SYSTEM_PROMPT } from '@/lib/architectural-knowledge';
+import { generateCreativeFloorPlan } from '@/lib/architectural-creative-engine';
 import { prisma } from '@/lib/db';
 
 /**
@@ -566,9 +567,10 @@ Apply all Neufert standards, circulation corridors, wet wall groupings, and wind
       }
     }
 
-    // 2. Procedural Architectural Engine fallback (Offline / No API Key)
+    // 2. Creative Procedural Architectural Engine (Prompt-driven & Dynamic Variation)
     if (!layoutJson) {
-      layoutJson = generateArchitecturalLayout({
+      layoutJson = generateCreativeFloorPlan({
+        description: description || '',
         bedrooms: Number(bedrooms),
         bathrooms: Number(bathrooms),
         totalArea: Number(totalArea),
