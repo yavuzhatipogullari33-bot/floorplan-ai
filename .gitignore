@@ -29,9 +29,7 @@
 next-env.d.ts
 
 # Database
-*.db
 *.db-journal
-dev.db
 dev.db-journal
 
 # Binaries
