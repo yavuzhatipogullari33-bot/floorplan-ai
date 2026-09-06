@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { genAI, MODEL, hasRealApiKey } from '@/lib/gemini';
+import { generateFloorPlanWithGemini } from '@/lib/gemini';
 import { generateSVG, FloorPlanLayout, RoomLayout, getCleanRoomLabel } from '@/lib/svg-generator';
 import { ARCHITECTURAL_AI_SYSTEM_PROMPT } from '@/lib/architectural-knowledge';
 import { generateCreativeFloorPlan } from '@/lib/architectural-creative-engine';
@@ -562,51 +562,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 1. Try Google Gemini AI (only when no specific shape is selected)
-    if (!layoutJson && hasRealApiKey && genAI) {
-      try {
-        const shapeHint = footprintShape
-          ? `\n- Building Footprint Shape: ${footprintShape} (IMPORTANT: design rooms to fit this footprint)`
-          : '';
-        const userPrompt = `DESIGN SPECIFICATIONS:
-- Number of Bedrooms: ${bedrooms}
-- Number of Bathrooms: ${bathrooms}
-- Target Total Area: ~${totalArea} m²
-- Architectural Style: ${style}
-- Requested Extras/Amenities: ${extras.join(', ') || 'Standard residential layout'}
-- User Design Notes: ${description || 'Design an optimal, well-proportioned, luxury residence.'}${shapeHint}
-- Primary Language for Room Labels: ${targetLang === 'tr' ? 'Turkish (e.g. Salon, Mutfak, Ebeveyn Yatak Odası, Ana Banyo, Koridor)' : 'English (e.g. Living Room, Kitchen, Master Bedroom, Main Bathroom, Hallway)'}.
-
-Apply all Neufert standards, circulation corridors, wet wall groupings, and window placements. Return ONLY the raw valid JSON matching the specified schema.`;
-
-        const response = await genAI.models.generateContent({
-          model: MODEL,
-          contents: [{ role: 'user', parts: [{ text: ARCHITECTURAL_AI_SYSTEM_PROMPT + '\n\n' + userPrompt }] }],
-          config: {
-            temperature: 0.4, // lower temperature for strictly valid architectural layouts
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const rawText = response.text ?? '';
-        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-
-        if (parsed.rooms && Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
-          parsed.rooms = parsed.rooms.map((r: RoomLayout) => ({
-            ...r,
-            label: getCleanRoomLabel(r, targetLang),
-          }));
-          const totalGrid = parsed.rooms.reduce((sum: number, r: RoomLayout) => sum + (r.w * r.h), 0);
-          if (totalGrid > 0) {
-            parsed.scale = Math.sqrt(Number(totalArea) / totalGrid);
-            parsed.totalArea = Number(totalArea);
-          }
-          layoutJson = parsed;
-        }
-      } catch (geminiError) {
-        console.warn('Gemini API call failed, falling back to architectural engine:', geminiError);
-      }
+    // 1. Try Google Gemini AI with Neufert standards, dynamic massing and polygon support
+    if (!layoutJson) {
+      layoutJson = await generateFloorPlanWithGemini({
+        bedrooms: Number(bedrooms),
+        bathrooms: Number(bathrooms),
+        totalArea: Number(totalArea),
+        style,
+        extras,
+        description,
+        language: targetLang,
+        footprintShape,
+      });
     }
 
     // 2. Creative Procedural Architectural Engine (Prompt-driven & Dynamic Variation)

@@ -114,7 +114,19 @@ export function parseArchitecturalPrompt(description: string = '', style: string
  * matches the user's requested totalArea precisely (Neufert precision).
  */
 export function calculatePreciseScale(rooms: RoomLayout[], targetArea: number): number {
-  const totalGridUnits = rooms.reduce((acc, r) => acc + (r.w * r.h), 0);
+  const totalGridUnits = rooms.reduce((acc, r) => {
+    if (r.polygon && r.polygon.length >= 3) {
+      let area = 0;
+      const n = r.polygon.length;
+      for (let i = 0; i < n; i++) {
+        const [x1, y1] = r.polygon[i];
+        const [x2, y2] = r.polygon[(i + 1) % n];
+        area += x1 * y2 - x2 * y1;
+      }
+      return acc + Math.abs(area) / 2;
+    }
+    return acc + (r.w * r.h);
+  }, 0);
   if (totalGridUnits <= 0) return 1.0;
   return Math.sqrt(targetArea / totalGridUnits);
 }

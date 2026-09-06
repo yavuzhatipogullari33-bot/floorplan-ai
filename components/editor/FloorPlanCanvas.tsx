@@ -20,6 +20,7 @@ import {
   WindowPlacement,
   generateSVG,
   getCleanRoomLabel,
+  calculateRoomArea,
   ROOM_COLORS,
   CELL_SIZE,
   PADDING,
@@ -1199,26 +1200,45 @@ export default function FloorPlanCanvas({
                 const colors = ROOM_COLORS[room.type] ?? ROOM_COLORS.hallway;
                 const isSelected = room.id === selectedRoomId;
                 const scale = layout?.scale || 1.2;
-                const areaM2 = (room.w * room.h * scale * scale).toFixed(1);
+                const areaM2 = calculateRoomArea(room, scale).toFixed(1);
+                const hasPolygon = Boolean(room.polygon && room.polygon.length >= 3);
+                const polyPoints = hasPolygon
+                  ? room.polygon!.map(([px, py]) => `${px * CELL_SIZE + PADDING},${py * CELL_SIZE + PADDING}`).join(' ')
+                  : '';
 
                 return (
                   <g key={room.id} className="cursor-pointer">
-                    {/* Room Background Rect */}
-                    <rect
-                      x={rx}
-                      y={ry}
-                      width={rw}
-                      height={rh}
-                      fill={colors.fill}
-                      stroke={isSelected ? '#059669' : colors.stroke}
-                      strokeWidth={isSelected ? WALL_THICKNESS + 2 : WALL_THICKNESS}
-                      rx="3"
-                      onMouseDown={(e) => handleMouseDownOnRoom(room.id, e)}
-                      className={cn(
-                        'transition-all duration-75',
-                        isSelected ? 'filter drop-shadow-lg' : 'hover:opacity-95'
-                      )}
-                    />
+                    {/* Room Background Rect or Polygon */}
+                    {hasPolygon ? (
+                      <polygon
+                        points={polyPoints}
+                        fill={colors.fill}
+                        stroke={isSelected ? '#059669' : colors.stroke}
+                        strokeWidth={isSelected ? WALL_THICKNESS + 2 : WALL_THICKNESS}
+                        strokeLinejoin="round"
+                        onMouseDown={(e) => handleMouseDownOnRoom(room.id, e)}
+                        className={cn(
+                          'transition-all duration-75',
+                          isSelected ? 'filter drop-shadow-lg' : 'hover:opacity-95'
+                        )}
+                      />
+                    ) : (
+                      <rect
+                        x={rx}
+                        y={ry}
+                        width={rw}
+                        height={rh}
+                        fill={colors.fill}
+                        stroke={isSelected ? '#059669' : colors.stroke}
+                        strokeWidth={isSelected ? WALL_THICKNESS + 2 : WALL_THICKNESS}
+                        rx="3"
+                        onMouseDown={(e) => handleMouseDownOnRoom(room.id, e)}
+                        className={cn(
+                          'transition-all duration-75',
+                          isSelected ? 'filter drop-shadow-lg' : 'hover:opacity-95'
+                        )}
+                      />
+                    )}
 
                     {/* Room Labels */}
                     <text

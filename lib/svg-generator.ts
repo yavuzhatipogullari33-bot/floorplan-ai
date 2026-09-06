@@ -1,10 +1,11 @@
 export interface RoomLayout {
   id: string;
   label: string;
-  x: number; // grid units
-  y: number;
-  w: number;
-  h: number;
+  x: number; // grid units (bounding box min X)
+  y: number; // grid units (bounding box min Y)
+  w: number; // width in grid units (bounding box width)
+  h: number; // height in grid units (bounding box height)
+  polygon?: [number, number][]; // optional polygon vertices in grid units: [[x1, y1], [x2, y2], ...] for non-rectangular rooms
   type: RoomType;
   doors?: DoorPlacement[];
   windows?: WindowPlacement[];
@@ -126,6 +127,24 @@ export function getCleanRoomLabel(room: RoomLayout, lang: 'tr' | 'en' = 'tr'): s
     if (room.id?.includes('dressing') || room.id?.includes('closet')) return 'Walk-in Closet';
     return ROOM_LABELS_EN[room.type] || room.label || 'Room';
   }
+}
+
+/**
+ * Calculates accurate room area in m² supporting both multi-point polygons (Shoelace formula)
+ * and standard rectangular grid boxes.
+ */
+export function calculateRoomArea(room: RoomLayout, scale: number): number {
+  if (room.polygon && room.polygon.length >= 3) {
+    let areaUnits = 0;
+    const n = room.polygon.length;
+    for (let i = 0; i < n; i++) {
+      const [x1, y1] = room.polygon[i];
+      const [x2, y2] = room.polygon[(i + 1) % n];
+      areaUnits += x1 * y2 - x2 * y1;
+    }
+    return (Math.abs(areaUnits) / 2) * scale * scale;
+  }
+  return room.w * room.h * scale * scale;
 }
 
 export const CELL_SIZE = 60; // pixels per grid unit
@@ -425,14 +444,38 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     const width = room.w * CELL_SIZE;
     const height = room.h * CELL_SIZE;
     const colors = ROOM_COLORS[room.type] ?? ROOM_COLORS.hallway;
-    const areaM2 = (room.w * room.h * scale * scale).toFixed(1);
+    const hasPolygon = Boolean(room.polygon && room.polygon.length >= 3);
+    const polyPointsStr = hasPolygon
+      ? room.polygon!.map(([px, py]) => `${px * CELL_SIZE + PADDING},${py * CELL_SIZE + PADDING}`).join(' ')
+      : '';
+    const areaM2 = calculateRoomArea(room, scale).toFixed(1);
     const roomWM = (room.w * scale).toFixed(1);
     const roomHM = (room.h * scale).toFixed(1);
     const displayLabel = getCleanRoomLabel(room, lang);
 
     // Double-line architectural wall representation
-    // Outer wall footprint
-    roomsSvg += `
+    // Outer wall footprint (polygonal or rectangular)
+    if (hasPolygon) {
+      roomsSvg += `
+      <g id="room-${room.id}">
+        <!-- Polygonal Room Floor Fill -->
+        <polygon
+          points="${polyPointsStr}"
+          fill="${colors.fill}"
+          stroke="#1E293B"
+          stroke-width="${WALL_THICKNESS}"
+          stroke-linejoin="round"
+        />
+        <polygon
+          points="${polyPointsStr}"
+          fill="none"
+          stroke="#E2E8F0"
+          stroke-width="1.0"
+          stroke-linejoin="round"
+        />
+      </g>`;
+    } else {
+      roomsSvg += `
       <g id="room-${room.id}">
         <!-- Room Base Floor Fill -->
         <rect
@@ -452,6 +495,7 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
           stroke-width="0.8"
         />
       </g>`;
+    }
 
     // Render internal architectural furniture
     furnitureSvg += renderArchitecturalFurniture(x, y, width, height, room.type, room.id);
