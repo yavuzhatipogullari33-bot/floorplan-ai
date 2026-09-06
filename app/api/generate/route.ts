@@ -546,16 +546,35 @@ export async function POST(req: NextRequest) {
       ? `${shapeKeyword[footprintShape]} ${description || ''}`.trim()
       : (description || '');
 
-    // 1. Try Google Gemini AI with deep architectural system prompt
-    if (hasRealApiKey && genAI) {
+    // ─── SHAPE-SELECTED PATH: Always use procedural engine ───────────────────
+    // When the user explicitly picks a building footprint from the Shape Selector,
+    // we SKIP Gemini entirely and route directly to our deterministic shape generators.
+    // This guarantees the selected shape is always honoured.
+    if (footprintShape && footprintShape !== 'rectangle') {
+      layoutJson = generateCreativeFloorPlan({
+        description: enhancedDescription,
+        bedrooms: Number(bedrooms),
+        bathrooms: Number(bathrooms),
+        totalArea: Number(totalArea),
+        style,
+        extras,
+        lang: targetLang,
+      });
+    }
+
+    // 1. Try Google Gemini AI (only when no specific shape is selected)
+    if (!layoutJson && hasRealApiKey && genAI) {
       try {
+        const shapeHint = footprintShape
+          ? `\n- Building Footprint Shape: ${footprintShape} (IMPORTANT: design rooms to fit this footprint)`
+          : '';
         const userPrompt = `DESIGN SPECIFICATIONS:
 - Number of Bedrooms: ${bedrooms}
 - Number of Bathrooms: ${bathrooms}
 - Target Total Area: ~${totalArea} m²
 - Architectural Style: ${style}
 - Requested Extras/Amenities: ${extras.join(', ') || 'Standard residential layout'}
-- User Design Notes: ${description || 'Design an optimal, well-proportioned, luxury residence.'}
+- User Design Notes: ${description || 'Design an optimal, well-proportioned, luxury residence.'}${shapeHint}
 - Primary Language for Room Labels: ${targetLang === 'tr' ? 'Turkish (e.g. Salon, Mutfak, Ebeveyn Yatak Odası, Ana Banyo, Koridor)' : 'English (e.g. Living Room, Kitchen, Master Bedroom, Main Bathroom, Hallway)'}.
 
 Apply all Neufert standards, circulation corridors, wet wall groupings, and window placements. Return ONLY the raw valid JSON matching the specified schema.`;
