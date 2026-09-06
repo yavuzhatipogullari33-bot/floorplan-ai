@@ -16,6 +16,8 @@ import {
   Unlock,
   Sparkles,
   Loader2,
+  X,
+  Layers,
 } from 'lucide-react';
 import {
   FloorPlanLayout,
@@ -407,6 +409,15 @@ export default function FloorPlanCanvas({
   // Multi-floor Ghost Trace State
   const [showGhostTrace, setShowGhostTrace] = useState(true);
 
+  // Visual Simplification & CAD Layer Controls (Ferahlatma & Sadeleştirme)
+  const [minimalMode, setMinimalMode] = useState(true);
+  const [showAxes, setShowAxes] = useState(false);
+  const [showColumns, setShowColumns] = useState(true);
+  const [showDimensions, setShowDimensions] = useState(true);
+  const [showFurniture, setShowFurniture] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const [isRefineOpen, setIsRefineOpen] = useState(false);
+
   function handleSwitchFloor(targetLevel: number) {
     if (!layout) return;
     const currentFloors = layout.floors || [
@@ -435,6 +446,12 @@ export default function FloorPlanCanvas({
       activeLevel: targetLevel,
       floorName: targetFloor.name,
       elevation: targetFloor.elevation,
+      showFurniture,
+      showAxes: !minimalMode && showAxes,
+      showColumns,
+      showDimensions,
+      showGrid,
+      minimalMode,
     });
 
     setLocalRooms(targetFloor.rooms);
@@ -478,13 +495,19 @@ export default function FloorPlanCanvas({
         ghostRooms: lowerFloor?.rooms,
         showGhostTrace,
         activeLevel: activeLvl,
+        showFurniture,
+        showAxes: !minimalMode && showAxes,
+        showColumns,
+        showDimensions,
+        showGrid,
+        minimalMode,
       });
 
       if (onLayoutChange) {
         onLayoutChange(updatedWithFloors, newSvg);
       }
     },
-    [layout, onLayoutChange, language, showGhostTrace]
+    [layout, onLayoutChange, language, showGhostTrace, showFurniture, showAxes, showColumns, showDimensions, showGrid, minimalMode]
   );
 
   // Global Pointer Events for seamless 60FPS drag
@@ -1387,6 +1410,81 @@ export default function FloorPlanCanvas({
           >
             <RotateCcw className="w-4 h-4" />
           </button>
+
+          <div className="h-4 w-px bg-gray-200 mx-1" />
+
+          {/* Sade Görünüm (Declutter / Minimalist Mode) */}
+          <button
+            onClick={() => {
+              const next = !minimalMode;
+              setMinimalMode(next);
+              if (next) {
+                setShowGrid(false);
+                setShowAxes(false);
+              }
+            }}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95',
+              minimalMode
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 ring-1 ring-emerald-300/40'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            )}
+            title={language === 'tr' ? 'Arka plan çizgilerini gizle, ferah ve minimalist sunum' : 'Clean uncluttered minimalist view'}
+          >
+            <Sparkles className={cn('w-3.5 h-3.5', minimalMode ? 'text-emerald-600' : 'text-slate-400')} />
+            <span>{language === 'tr' ? (minimalMode ? 'Sade Mod: Açık' : 'Sadeleştir') : (minimalMode ? 'Minimal: On' : 'Declutter')}</span>
+          </button>
+
+          {/* AI Quick Refine Trigger Button */}
+          {layout && (
+            <button
+              onClick={() => setIsRefineOpen(!isRefineOpen)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95',
+                isRefineOpen
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                  : 'bg-indigo-50/70 text-indigo-700 hover:bg-indigo-100 border border-indigo-200'
+              )}
+              title={language === 'tr' ? 'Yapay zeka ile planı iyileştir ve oda koordinatlarını düzenle' : 'Refine layout with AI'}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{language === 'tr' ? 'AI İyileştir' : 'AI Refine'}</span>
+            </button>
+          )}
+
+          {/* Katmanlar (Layers) Quick Controls */}
+          <div className="hidden lg:flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200 text-[11px] font-semibold">
+            <button
+              onClick={() => setShowAxes(!showAxes)}
+              className={cn(
+                'px-2 py-1 rounded-lg transition-all',
+                showAxes ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-400 hover:text-slate-700'
+              )}
+              title={language === 'tr' ? 'Taşıyıcı Aks Çizgileri' : 'Structural Axes'}
+            >
+              📐 {language === 'tr' ? 'Aks' : 'Axes'}
+            </button>
+            <button
+              onClick={() => setShowColumns(!showColumns)}
+              className={cn(
+                'px-2 py-1 rounded-lg transition-all',
+                showColumns ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-400 hover:text-slate-700'
+              )}
+              title={language === 'tr' ? 'Taşıyıcı Kolonlar' : 'Columns'}
+            >
+              ⬛ {language === 'tr' ? 'Kolon' : 'Columns'}
+            </button>
+            <button
+              onClick={() => setShowGrid(!showGrid)}
+              className={cn(
+                'px-2 py-1 rounded-lg transition-all',
+                showGrid ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-400 hover:text-slate-700'
+              )}
+              title={language === 'tr' ? 'Izgara' : 'Grid'}
+            >
+              ▦ {language === 'tr' ? 'Izgara' : 'Grid'}
+            </button>
+          </div>
         </div>
 
         {/* Center: Live Dimensions Bar & Multi-Floor Switcher */}
@@ -1525,31 +1623,33 @@ export default function FloorPlanCanvas({
               className="bg-white shadow-2xl rounded-2xl border border-gray-300"
               style={{ overflow: 'visible' }}
             >
-              {/* Background Precision Grid Lines */}
-              {Array.from({ length: gridW + 1 }, (_, gx) => (
-                <line
-                  key={`gx-${gx}`}
-                  x1={gx * CELL_SIZE + PADDING}
-                  y1={PADDING}
-                  x2={gx * CELL_SIZE + PADDING}
-                  y2={gridH * CELL_SIZE + PADDING}
-                  stroke="#CBD5E1"
-                  strokeWidth="0.6"
-                  strokeDasharray="2,3"
-                />
-              ))}
-              {Array.from({ length: gridH + 1 }, (_, gy) => (
-                <line
-                  key={`gy-${gy}`}
-                  x1={PADDING}
-                  y1={gy * CELL_SIZE + PADDING}
-                  x2={gridW * CELL_SIZE + PADDING}
-                  y2={gy * CELL_SIZE + PADDING}
-                  stroke="#CBD5E1"
-                  strokeWidth="0.6"
-                  strokeDasharray="2,3"
-                />
-              ))}
+              {/* Background Precision Grid Lines (Only when enabled & not minimal) */}
+              {showGrid && !minimalMode && (
+                <>
+                  {Array.from({ length: gridW + 1 }, (_, gx) => (
+                    <line
+                      key={`gx-${gx}`}
+                      x1={gx * CELL_SIZE + PADDING}
+                      y1={PADDING}
+                      x2={gx * CELL_SIZE + PADDING}
+                      y2={gridH * CELL_SIZE + PADDING}
+                      stroke="#F1F5F9"
+                      strokeWidth="0.8"
+                    />
+                  ))}
+                  {Array.from({ length: gridH + 1 }, (_, gy) => (
+                    <line
+                      key={`gy-${gy}`}
+                      x1={PADDING}
+                      y1={gy * CELL_SIZE + PADDING}
+                      x2={gridW * CELL_SIZE + PADDING}
+                      y2={gy * CELL_SIZE + PADDING}
+                      stroke="#F1F5F9"
+                      strokeWidth="0.8"
+                    />
+                  ))}
+                </>
+              )}
 
               {/* Ghost Trace Reference from Floor Below (%20 Opacity CAD Overlay) */}
               {showGhostTrace &&
@@ -2356,83 +2456,40 @@ export default function FloorPlanCanvas({
                 </g>
               )}
 
-              {/* Floating Live CAD Measurement HUD Badge */}
+              {/* Floating Live CAD Measurement HUD Badge (Minimalist Capsule) */}
               {dragFeedback?.active && (
                 <g
-                  className="pointer-events-none filter drop-shadow-xl"
-                  transform={`translate(${Math.max(120, Math.min(svgWidth - 120, dragFeedback.hudX))}, ${Math.max(45, Math.min(svgHeight - 45, dragFeedback.hudY))})`}
+                  className="pointer-events-none filter drop-shadow-md"
+                  transform={`translate(${Math.max(90, Math.min(svgWidth - 90, dragFeedback.hudX))}, ${Math.max(25, Math.min(svgHeight - 25, dragFeedback.hudY))})`}
                 >
                   <rect
-                    x={-120}
-                    y={dragFeedback.isShared ? -42 : -32}
-                    width={240}
-                    height={dragFeedback.isShared ? 84 : 64}
-                    rx={10}
+                    x={-90}
+                    y={-14}
+                    width={180}
+                    height={28}
+                    rx={14}
                     fill="#0F172A"
-                    fillOpacity={0.94}
+                    fillOpacity={0.92}
                     stroke={dragFeedback.isShared ? '#818CF8' : '#38BDF8'}
-                    strokeWidth={1.6}
+                    strokeWidth={1.2}
                   />
 
-                  {/* Header: Length & Delta */}
+                  {/* Single Clean Line: Length, Delta & Area */}
                   <text
                     x={0}
-                    y={dragFeedback.isShared ? -22 : -13}
+                    y={4}
                     textAnchor="middle"
                     fill="#F8FAFC"
-                    fontSize="13"
-                    fontWeight="bold"
+                    fontSize="11"
+                    fontWeight="700"
                     fontFamily="Inter, system-ui, sans-serif"
                   >
                     <tspan fill={dragFeedback.isShared ? '#A5B4FC' : '#38BDF8'}>
-                      {dragFeedback.currentLengthCm ? `${dragFeedback.currentLengthCm} (${dragFeedback.currentLengthM}m)` : `${dragFeedback.currentLengthM}m`}
+                      {dragFeedback.currentLengthCm || `${dragFeedback.currentLengthM}m`}
                     </tspan>
-                    <tspan fill="#94A3B8" fontSize="11"> | </tspan>
-                    <tspan fill={dragFeedback.deltaM.startsWith('+') ? '#34D399' : '#FBBF24'} fontSize="11" fontWeight="600">
-                      {dragFeedback.deltaCm || dragFeedback.deltaM}
-                    </tspan>
-                  </text>
-
-                  {/* Primary Room Area */}
-                  <text
-                    x={0}
-                    y={dragFeedback.isShared ? -4 : 4}
-                    textAnchor="middle"
-                    fill="#CBD5E1"
-                    fontSize="11"
-                    fontFamily="Inter, system-ui, sans-serif"
-                  >
-                    <tspan fontWeight="bold" fill="#F1F5F9">{dragFeedback.roomLabel}: </tspan>
-                    <tspan fill="#67E8F9" fontWeight="600">{dragFeedback.roomAreaM2} m²</tspan>
-                  </text>
-
-                  {/* Shared Synchronized Neighbor Row */}
-                  {dragFeedback.isShared && dragFeedback.neighborLabel && (
-                    <text
-                      x={0}
-                      y={16}
-                      textAnchor="middle"
-                      fill="#C7D2FE"
-                      fontSize="10.5"
-                      fontWeight="600"
-                      fontFamily="Inter, system-ui, sans-serif"
-                    >
-                      🔗 {dragFeedback.neighborLabel}: <tspan fill="#A5B4FC">{dragFeedback.neighborAreaM2} m²</tspan>
-                    </text>
-                  )}
-
-                  {/* Status Footer */}
-                  <text
-                    x={0}
-                    y={dragFeedback.isShared ? 32 : 20}
-                    textAnchor="middle"
-                    fill={dragFeedback.isShared ? '#818CF8' : '#64748B'}
-                    fontSize="9"
-                    fontWeight="bold"
-                    letterSpacing="0.5"
-                    fontFamily="Inter, system-ui, sans-serif"
-                  >
-                    {dragFeedback.isShared ? 'ORTAK DUVAR SENKRONİZASYONU' : 'CAD ÖLÇEK KİLİTLİ'}
+                    <tspan fill="#94A3B8" fontSize="9.5"> ({dragFeedback.deltaCm || dragFeedback.deltaM})</tspan>
+                    <tspan fill="#64748B" fontSize="9"> · </tspan>
+                    <tspan fill="#34D399" fontSize="9.5">{dragFeedback.roomAreaM2} m²</tspan>
                   </text>
                 </g>
               )}
@@ -2574,15 +2631,15 @@ export default function FloorPlanCanvas({
           </div>
         )}
 
-        {/* AI Refinement & Correction Floating Toolbar */}
-        {layout && !isGenerating && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-xl w-[92%] sm:w-auto pointer-events-auto animate-fade-in">
+        {/* AI Refinement & Correction Floating Toolbar (Only shown when opened via button) */}
+        {layout && !isGenerating && isRefineOpen && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-xl w-[92%] sm:w-auto pointer-events-auto animate-in fade-in slide-in-from-top-2 duration-150">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 handleQuickRefine();
               }}
-              className="flex items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-xl border border-indigo-100 w-full"
+              className="flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl shadow-xl border border-indigo-200 w-full"
             >
               <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs shrink-0">
                 <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
@@ -2617,6 +2674,14 @@ export default function FloorPlanCanvas({
                   <Sparkles className="w-3.5 h-3.5" />
                 )}
                 <span>{language === 'tr' ? 'Uygula' : 'Apply'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsRefineOpen(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                title={language === 'tr' ? 'Kapat' : 'Close'}
+              >
+                <X className="w-4 h-4" />
               </button>
             </form>
 

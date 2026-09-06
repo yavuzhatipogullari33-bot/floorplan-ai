@@ -561,29 +561,29 @@ function renderStructuralAxes(layout: FloorPlanLayout): string {
     }
   }
 
-  let svg = '\n    <!-- Taşıyıcı Aks Çizgileri ve Aks Balonları -->\n    <g class="structural-axes" pointer-events="none">\n';
+  let svg = '\n    <!-- Taşıyıcı Aks Çizgileri ve Aks Balonları (Zarif & Hafif) -->\n    <g class="structural-axes" pointer-events="none">\n';
 
-  const axisR = 9;
-  const topY = startY - 45;
-  const botY = startY + planH + 45;
-  const leftX = startX - 45;
-  const rightX = startX + planW + 45;
+  const axisR = 7.5;
+  const topY = startY - 35;
+  const botY = startY + planH + 35;
+  const leftX = startX - 35;
+  const rightX = startX + planW + 35;
 
   // 1. Düşey Akslar (1, 2, 3...)
   axesX.forEach((gx, idx) => {
     const px = PADDING + gx * CELL_SIZE;
     const label = (idx + 1).toString();
 
-    // Axis line (dashed center line - ISO architectural standard)
-    svg += `      <line x1="${px}" y1="${topY + axisR}" x2="${px}" y2="${botY - axisR}" stroke="#94A3B8" stroke-width="0.8" stroke-dasharray="8,3,2,3"/>\n`;
+    // Axis line (delicate, soft, non-intrusive)
+    svg += `      <line x1="${px}" y1="${topY + axisR}" x2="${px}" y2="${botY - axisR}" stroke="#CBD5E1" stroke-width="0.6" stroke-dasharray="5,4"/>\n`;
 
     // Top Axis Bubble
-    svg += `      <circle cx="${px}" cy="${topY}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
-    svg += `      <text x="${px}" y="${topY + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+    svg += `      <circle cx="${px}" cy="${topY}" r="${axisR}" fill="#FFFFFF" stroke="#94A3B8" stroke-width="0.8"/>\n`;
+    svg += `      <text x="${px}" y="${topY + 2.6}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#475569">${label}</text>\n`;
 
     // Bottom Axis Bubble
-    svg += `      <circle cx="${px}" cy="${botY}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
-    svg += `      <text x="${px}" y="${botY + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+    svg += `      <circle cx="${px}" cy="${botY}" r="${axisR}" fill="#FFFFFF" stroke="#94A3B8" stroke-width="0.8"/>\n`;
+    svg += `      <text x="${px}" y="${botY + 2.6}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#475569">${label}</text>\n`;
   });
 
   // 2. Yatay Akslar (A, B, C...)
@@ -593,15 +593,15 @@ function renderStructuralAxes(layout: FloorPlanLayout): string {
     const label = letters[idx % letters.length];
 
     // Axis line
-    svg += `      <line x1="${leftX + axisR}" y1="${py}" x2="${rightX - axisR}" y2="${py}" stroke="#94A3B8" stroke-width="0.8" stroke-dasharray="8,3,2,3"/>\n`;
+    svg += `      <line x1="${leftX + axisR}" y1="${py}" x2="${rightX - axisR}" y2="${py}" stroke="#CBD5E1" stroke-width="0.6" stroke-dasharray="5,4"/>\n`;
 
     // Left Axis Bubble
-    svg += `      <circle cx="${leftX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
-    svg += `      <text x="${leftX}" y="${py + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+    svg += `      <circle cx="${leftX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#94A3B8" stroke-width="0.8"/>\n`;
+    svg += `      <text x="${leftX}" y="${py + 2.6}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#475569">${label}</text>\n`;
 
     // Right Axis Bubble
-    svg += `      <circle cx="${rightX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
-    svg += `      <text x="${rightX}" y="${py + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+    svg += `      <circle cx="${rightX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#94A3B8" stroke-width="0.8"/>\n`;
+    svg += `      <text x="${rightX}" y="${py + 2.6}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#475569">${label}</text>\n`;
   });
 
   svg += '    </g>\n';
@@ -610,37 +610,47 @@ function renderStructuralAxes(layout: FloorPlanLayout): string {
 
 /**
  * TAŞIYICI KOLON VE PERDE LEKE GÖSTERİMLERİ (STRUCTURAL REINFORCED COLUMNS)
- * Duvar birleşimlerinde ve aks düğüm noktalarında betonarme kolon/perde lekesi
+ * Ana aks kesişimlerinde zarif, minimalist kolon lekeleri (boğucu olmayan)
  */
 function renderStructuralColumns(layout: FloorPlanLayout): string {
   const { rooms } = layout;
   if (!rooms || rooms.length === 0) return '';
 
-  const corners = new Set<string>();
+  const rawCorners: [number, number][] = [];
 
   for (const r of rooms) {
     if (r.polygon && r.polygon.length >= 3) {
       for (const [px, py] of r.polygon) {
-        corners.add(`${px},${py}`);
+        rawCorners.push([px, py]);
       }
     } else {
-      corners.add(`${r.x},${r.y}`);
-      corners.add(`${r.x + r.w},${r.y}`);
-      corners.add(`${r.x + r.w},${r.y + r.h}`);
-      corners.add(`${r.x},${r.y + r.h}`);
+      rawCorners.push([r.x, r.y]);
+      rawCorners.push([r.x + r.w, r.y]);
+      rawCorners.push([r.x + r.w, r.y + r.h]);
+      rawCorners.push([r.x, r.y + r.h]);
     }
   }
 
-  let svg = '\n    <!-- Taşıyıcı Kolon ve Perde Gösterimleri -->\n    <g class="structural-columns" pointer-events="none">\n';
-  const colSize = 10; // ~25x25cm architectural column
+  // Filter corners so columns are well-spaced and not cluttering the interior
+  const filteredCorners: [number, number][] = [];
+  for (const [cx, cy] of rawCorners) {
+    const isTooClose = filteredCorners.some(
+      ([fx, fy]) => Math.hypot(cx - fx, cy - fy) < 3.2
+    );
+    if (!isTooClose) {
+      filteredCorners.push([cx, cy]);
+    }
+  }
 
-  corners.forEach((coordStr) => {
-    const [gx, gy] = coordStr.split(',').map(Number);
+  let svg = '\n    <!-- Taşıyıcı Kolon Gösterimleri (Zarif & Minimalist) -->\n    <g class="structural-columns" pointer-events="none">\n';
+  const colSize = 6; // delicate 6x6 architectural column
+
+  filteredCorners.forEach(([gx, gy]) => {
     const px = PADDING + gx * CELL_SIZE;
     const py = PADDING + gy * CELL_SIZE;
 
-    // Betonarme Kolon (Solid Dark Charcoal with subtle boundary)
-    svg += `      <rect x="${px - colSize / 2}" y="${py - colSize / 2}" width="${colSize}" height="${colSize}" fill="#0F172A" stroke="#475569" stroke-width="0.8" rx="1"/>\n`;
+    // Betonarme Kolon (Zarif Slate Gri)
+    svg += `      <rect x="${px - colSize / 2}" y="${py - colSize / 2}" width="${colSize}" height="${colSize}" fill="#475569" rx="1.2"/>\n`;
   });
 
   svg += '    </g>\n';
@@ -653,6 +663,12 @@ export interface GenerateSVGOptions {
   activeLevel?: number;
   floorName?: string;
   elevation?: number;
+  showFurniture?: boolean;
+  showAxes?: boolean;
+  showColumns?: boolean;
+  showDimensions?: boolean;
+  showGrid?: boolean;
+  minimalMode?: boolean;
 }
 
 /**
@@ -753,8 +769,10 @@ export function generateSVG(
       </g>`;
     }
 
-    // Render internal architectural furniture
-    furnitureSvg += renderArchitecturalFurniture(x, y, width, height, room.type, room.id);
+    // Render internal architectural furniture (only if showFurniture !== false)
+    if (options?.showFurniture !== false) {
+      furnitureSvg += renderArchitecturalFurniture(x, y, width, height, room.type, room.id);
+    }
 
     // Render doors
     if (room.doors) {
@@ -770,65 +788,67 @@ export function generateSVG(
       }
     }
 
-    // Professional Room Label & Area Badge (Piramit rozet)
+    // Professional Room Label & Area Badge (Minimalist & ferah rozet)
     const cx = x + width / 2;
-    const cy = y + height - 22;
+    const cy = y + height - 20;
 
     roomsSvg += `
       <!-- Architectural Room Stamp -->
       <g class="room-stamp" pointer-events="none">
         <rect
-          x="${cx - 54}" y="${cy - 12}"
-          width="108" height="26"
-          rx="5"
+          x="${cx - 48}" y="${cy - 11}"
+          width="96" height="24"
+          rx="6"
           fill="#FFFFFF"
-          fill-opacity="0.94"
-          stroke="#CBD5E1"
-          stroke-width="0.8"
+          fill-opacity="0.88"
+          stroke="#E2E8F0"
+          stroke-width="0.6"
         />
         ${room.locked ? `
         <!-- Lock Indicator Badge -->
-        <g transform="translate(${cx + 40}, ${cy - 9})">
-          <circle cx="6" cy="6" r="7" fill="#F59E0B" />
-          <path d="M4 5V3.8a2 2 0 0 1 4 0V5 M3 5h6v4.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5z" fill="none" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round"/>
+        <g transform="translate(${cx + 36}, ${cy - 8})">
+          <circle cx="5" cy="5" r="6" fill="#F59E0B" />
+          <path d="M3.5 4.5V3.5a1.5 1.5 0 0 1 3 0v1 M2.5 4.5h5v3.5a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.0" stroke-linecap="round"/>
         </g>` : ''}
         <text
           x="${cx}" y="${cy}"
           text-anchor="middle"
           font-family="Inter, system-ui, sans-serif"
-          font-size="10"
+          font-size="9.5"
           font-weight="700"
           letter-spacing="-0.01em"
           fill="#0F172A"
         >${displayLabel}</text>
         <text
-          x="${cx}" y="${cy + 10}"
+          x="${cx}" y="${cy + 9}"
           text-anchor="middle"
           font-family="Inter, system-ui, sans-serif"
-          font-size="8"
+          font-size="7.5"
           font-weight="600"
           fill="${colors.accent}"
         >${areaM2} m² (${roomWM}×${roomHM}m)</text>
       </g>`;
   }
 
-  // 2. Subtle architectural grid lines
+  // 2. Subtle architectural grid lines (only if requested, default false to keep canvas uncluttered)
   let gridLines = '';
-  for (let gx = 0; gx <= gridWidth; gx++) {
-    gridLines += `<line x1="${gx * CELL_SIZE + PADDING}" y1="${PADDING}" x2="${gx * CELL_SIZE + PADDING}" y2="${gridHeight * CELL_SIZE + PADDING}" stroke="#F1F5F9" stroke-width="0.8"/>`;
+  if (options?.showGrid === true) {
+    for (let gx = 0; gx <= gridWidth; gx++) {
+      gridLines += `<line x1="${gx * CELL_SIZE + PADDING}" y1="${PADDING}" x2="${gx * CELL_SIZE + PADDING}" y2="${gridHeight * CELL_SIZE + PADDING}" stroke="#F8FAFC" stroke-width="0.6"/>`;
+    }
+    for (let gy = 0; gy <= gridHeight; gy++) {
+      gridLines += `<line x1="${PADDING}" y1="${gy * CELL_SIZE + PADDING}" x2="${gridWidth * CELL_SIZE + PADDING}" y2="${gy * CELL_SIZE + PADDING}" stroke="#F8FAFC" stroke-width="0.6"/>`;
+    }
   }
-  for (let gy = 0; gy <= gridHeight; gy++) {
-    gridLines += `<line x1="${PADDING}" y1="${gy * CELL_SIZE + PADDING}" x2="${gridWidth * CELL_SIZE + PADDING}" y2="${gy * CELL_SIZE + PADDING}" stroke="#F1F5F9" stroke-width="0.8"/>`;
-  }
 
-  // 3. Structural Axes (Taşıyıcı Aks Çizgileri ve Aks Balonları)
-  const structuralAxes = renderStructuralAxes(layout);
+  // 3. Structural Axes (Taşıyıcı Aks Çizgileri ve Aks Balonları - Default OFF for clean view)
+  const structuralAxes = options?.showAxes === true ? renderStructuralAxes(layout) : '';
 
-  // 4. Structural Columns (Taşıyıcı Kolon ve Perde Leke Gösterimleri)
-  const structuralColumns = renderStructuralColumns(layout);
+  // 4. Structural Columns (Taşıyıcı Kolon Gösterimleri - Default ON, subtle & minimal)
+  const structuralColumns = options?.showColumns !== false ? renderStructuralColumns(layout) : '';
 
-  // 5. Dimension lines
-  const dimensionLines = renderDimensionLines(layout);
+  // 5. Dimension lines (Default ON, clean)
+  const dimensionLines = options?.showDimensions !== false ? renderDimensionLines(layout) : '';
 
   // 6. Scale bar & Title stamp (Mimari Pafta Başlığı)
   const scaleBarWidth = CELL_SIZE * 2; // 2 units

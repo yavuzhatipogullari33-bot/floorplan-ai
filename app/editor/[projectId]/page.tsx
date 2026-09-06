@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, use } from 'react';
-import { ArrowLeft, Home, Sparkles } from 'lucide-react';
+import { ArrowLeft, Home, Sparkles, SlidersHorizontal, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 import PromptPanel, { GenerateParams } from '@/components/editor/PromptPanel';
 import FloorPlanCanvas from '@/components/editor/FloorPlanCanvas';
@@ -11,6 +11,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import LanguageSelector from '@/components/LanguageSelector';
 import ProjectSetupWizardModal from '@/components/wizard/ProjectSetupWizardModal';
 import { useWizardStore } from '@/lib/stores/wizardStore';
+import { cn } from '@/lib/utils';
 
 export default function EditorPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params);
@@ -23,6 +24,10 @@ export default function EditorPage({ params }: { params: Promise<{ projectId: st
   const [projectName, setProjectName] = useState(language === 'tr' ? 'İsimsiz Kat Planı' : 'Untitled Floor Plan');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [error, setError] = useState<string | null>(null);
+
+  // Spacious UI panel toggle states (Ferahlatma & Sadeleştirme)
+  const [showPromptPanel, setShowPromptPanel] = useState(true);
+  const [showChatPanel, setShowChatPanel] = useState(false);
 
   // Load project on mount
   useEffect(() => {
@@ -181,6 +186,32 @@ export default function EditorPage({ params }: { params: Promise<{ projectId: st
             <span>{language === 'tr' ? 'Kurulum Sihirbazı' : 'Setup Wizard'}</span>
           </button>
 
+          {/* Panel Visibility Toggles (Ferah & Odaklanmış Çalışma Alanı) */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+            <button
+              onClick={() => setShowPromptPanel(!showPromptPanel)}
+              className={cn(
+                'px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5',
+                showPromptPanel ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+              )}
+              title={language === 'tr' ? 'Parametreler Panelini Göster/Gizle' : 'Toggle Parameters Panel'}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">{language === 'tr' ? 'Parametreler' : 'Settings'}</span>
+            </button>
+            <button
+              onClick={() => setShowChatPanel(!showChatPanel)}
+              className={cn(
+                'px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5',
+                showChatPanel ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+              )}
+              title={language === 'tr' ? 'AI Asistan Sohbetini Göster/Gizle' : 'Toggle AI Chat'}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">{language === 'tr' ? 'Sohbet' : 'Chat'}</span>
+            </button>
+          </div>
+
           <div className="flex items-center gap-1.5 text-xs text-gray-400">
             {saveStatus === 'saving' ? (
               <><div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />{t.editor.saving}</>
@@ -195,15 +226,17 @@ export default function EditorPage({ params }: { params: Promise<{ projectId: st
         </div>
       </header>
 
-      {/* Main 3-panel layout */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main Spacious Layout */}
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Left: Prompt Panel */}
-        <div className="w-80 flex-shrink-0 border-r border-gray-200 overflow-hidden flex flex-col bg-white">
-          <PromptPanel onGenerate={handleGenerate} isGenerating={isGenerating} />
-        </div>
+        {showPromptPanel && (
+          <div className="w-80 flex-shrink-0 border-r border-gray-200 overflow-hidden flex flex-col bg-white animate-in slide-in-from-left duration-150">
+            <PromptPanel onGenerate={handleGenerate} isGenerating={isGenerating} />
+          </div>
+        )}
 
-        {/* Center: Floor Plan Canvas */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        {/* Center: Floor Plan Canvas (Gets Full Space when sidebars are closed!) */}
+        <div className="flex-1 overflow-hidden flex flex-col min-w-0">
           <FloorPlanCanvas
             svgData={svgData}
             layout={layout}
@@ -213,14 +246,16 @@ export default function EditorPage({ params }: { params: Promise<{ projectId: st
         </div>
 
         {/* Right: Chat Panel */}
-        <div className="w-80 flex-shrink-0 border-l border-gray-200 overflow-hidden flex flex-col bg-white">
-          <ChatPanel
-            currentLayout={layout}
-            projectId={projectId !== 'new' ? projectId : undefined}
-            onLayoutUpdate={handleLayoutUpdate}
-            disabled={!layout}
-          />
-        </div>
+        {showChatPanel && (
+          <div className="w-80 flex-shrink-0 border-l border-gray-200 overflow-hidden flex flex-col bg-white animate-in slide-in-from-right duration-150">
+            <ChatPanel
+              currentLayout={layout}
+              projectId={projectId !== 'new' ? projectId : undefined}
+              onLayoutUpdate={handleLayoutUpdate}
+              disabled={!layout}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
