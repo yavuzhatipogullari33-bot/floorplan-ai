@@ -10,6 +10,7 @@ export interface RoomLayout {
   doors?: DoorPlacement[];
   windows?: WindowPlacement[];
   furniture?: FurniturePlacement[];
+  locked?: boolean; // When true, AI refinement & modifications will NOT alter this room's position or size
 }
 
 export type RoomType =
@@ -669,6 +670,12 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
           stroke="#CBD5E1"
           stroke-width="0.8"
         />
+        ${room.locked ? `
+        <!-- Lock Indicator Badge -->
+        <g transform="translate(${cx + 40}, ${cy - 9})">
+          <circle cx="6" cy="6" r="7" fill="#F59E0B" />
+          <path d="M4 5V3.8a2 2 0 0 1 4 0V5 M3 5h6v4.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5z" fill="none" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round"/>
+        </g>` : ''}
         <text
           x="${cx}" y="${cy}"
           text-anchor="middle"

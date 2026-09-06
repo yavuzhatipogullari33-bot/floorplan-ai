@@ -12,6 +12,10 @@ import {
   DoorOpen,
   AppWindow,
   RotateCw,
+  Lock,
+  Unlock,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import {
   FloorPlanLayout,
@@ -303,6 +307,61 @@ export default function FloorPlanCanvas({
   }, [localRooms, selectedRoomId]);
 
   const selectedRoom = localRooms.find((r) => r.id === selectedRoomId) || null;
+
+  // AI Refinement State
+  const [refinePrompt, setRefinePrompt] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
+  const [refineFeedback, setRefineFeedback] = useState<string | null>(null);
+
+  function toggleLockSelectedRoom() {
+    if (!selectedRoom) return;
+    const updated = localRooms.map((r) =>
+      r.id === selectedRoom.id ? { ...r, locked: !r.locked } : r
+    );
+    setLocalRooms(updated);
+    commitLayoutChange(updated);
+  }
+
+  async function handleQuickRefine(promptText?: string) {
+    const text = promptText || refinePrompt.trim();
+    if (!text || isRefining || !layout) return;
+
+    setIsRefining(true);
+    setRefineFeedback(null);
+
+    try {
+      const response = await fetch('/api/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instruction: text,
+          currentLayout: { ...layout, rooms: localRooms },
+          projectId: layout && 'id' in layout ? (layout as any).id : undefined,
+          language,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Refine failed');
+      }
+
+      if (data.layout) {
+        setLocalRooms(data.layout.rooms);
+        if (onLayoutChange) {
+          onLayoutChange(data.layout, data.svg);
+        }
+        setRefineFeedback(data.reply || (language === 'tr' ? 'Plan başarıyla güncellendi.' : 'Plan refined.'));
+        setRefinePrompt('');
+        setTimeout(() => setRefineFeedback(null), 5000);
+      }
+    } catch (err) {
+      setRefineFeedback(language === 'tr' ? 'İyileştirme uygulanamadı.' : 'Refinement could not be applied.');
+      setTimeout(() => setRefineFeedback(null), 4000);
+    } finally {
+      setIsRefining(false);
+    }
+  }
 
   // Zoom / Pan helpers
   function resetView() {
@@ -857,7 +916,7 @@ export default function FloorPlanCanvas({
 
     setSelectedRoomId(roomId);
     const room = localRooms.find((r) => r.id === roomId);
-    if (!room) return;
+    if (!room || room.locked) return;
 
     startDragging({
       mode: 'move-room',
@@ -881,7 +940,7 @@ export default function FloorPlanCanvas({
     e.stopPropagation();
 
     const room = localRooms.find((r) => r.id === roomId);
-    if (!room) return;
+    if (!room || room.locked) return;
 
     setSelectedRoomId(roomId);
     startDragging({
@@ -982,7 +1041,7 @@ export default function FloorPlanCanvas({
   }
 
   function rotateSelectedRoom() {
-    if (!selectedRoom) return;
+    if (!selectedRoom || selectedRoom.locked) return;
     const updated = localRooms.map((r) => {
       if (r.id === selectedRoom.id) {
         return {
@@ -998,7 +1057,7 @@ export default function FloorPlanCanvas({
   }
 
   function deleteSelectedRoom() {
-    if (!selectedRoom) return;
+    if (!selectedRoom || selectedRoom.locked) return;
     const updated = localRooms.filter((r) => r.id !== selectedRoom.id);
     setSelectedRoomId(null);
     setLocalRooms(updated);
@@ -1264,6 +1323,29 @@ export default function FloorPlanCanvas({
                     >
                       {areaM2} m²
                     </text>
+
+                    {/* Room Lock Badge */}
+                    {room.locked && (
+                      <g
+                        transform={`translate(${rx + rw - 20}, ${ry + 5})`}
+                        className="cursor-pointer pointer-events-auto"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedRoomId(room.id);
+                          toggleLockSelectedRoom();
+                        }}
+                      >
+                        <rect width="16" height="16" rx="4" fill="#F59E0B" fillOpacity="0.95" />
+                        <path
+                          d="M5 7V5.5a3 3 0 0 1 6 0V7m-4.5 0h7a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"
+                          fill="none"
+                          stroke="#FFFFFF"
+                          strokeWidth="1.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </g>
+                    )}
 
                     {/* Doors - Pure JSX Render & Smooth Drag Handles */}
                     {room.doors?.map((door, dIdx) => {
@@ -1944,6 +2026,38 @@ export default function FloorPlanCanvas({
               <span>+ {t.editor.addWindow}</span>
             </button>
 
+            {/* Lock / Unlock Room */}
+            <button
+              onClick={toggleLockSelectedRoom}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95',
+                selectedRoom.locked
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
+                  : 'bg-gray-100 hover:bg-amber-50 text-gray-700 hover:text-amber-800'
+              )}
+              title={
+                selectedRoom.locked
+                  ? language === 'tr'
+                    ? 'Kilidi Aç'
+                    : 'Unlock Room'
+                  : language === 'tr'
+                  ? 'Odayı Kilitle (AI Değiştirmesin)'
+                  : "Lock Room (AI Won't Touch)"
+              }
+            >
+              {selectedRoom.locked ? (
+                <>
+                  <Lock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{language === 'tr' ? 'Kilitli' : 'Locked'}</span>
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-3.5 h-3.5 text-gray-500" />
+                  <span>{language === 'tr' ? 'Kilitle' : 'Lock'}</span>
+                </>
+              )}
+            </button>
+
             {/* Rotate Room */}
             <button
               onClick={rotateSelectedRoom}
@@ -1963,6 +2077,89 @@ export default function FloorPlanCanvas({
               <Trash2 className="w-3.5 h-3.5" />
               <span>{t.editor.deleteRoom}</span>
             </button>
+          </div>
+        )}
+
+        {/* AI Refinement & Correction Floating Toolbar */}
+        {layout && !isGenerating && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-xl w-[92%] sm:w-auto pointer-events-auto animate-fade-in">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleQuickRefine();
+              }}
+              className="flex items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-xl border border-indigo-100 w-full"
+            >
+              <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs shrink-0">
+                <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
+                <span className="hidden sm:inline">
+                  {language === 'tr' ? 'Hızlı İyileştir:' : 'Quick Refine:'}
+                </span>
+              </div>
+              <input
+                type="text"
+                value={refinePrompt}
+                onChange={(e) => setRefinePrompt(e.target.value)}
+                placeholder={
+                  selectedRoom
+                    ? language === 'tr'
+                      ? `${getCleanRoomLabel(selectedRoom, language)} için örn: Büyüt, sola al...`
+                      : `e.g. Enlarge ${getCleanRoomLabel(selectedRoom, language)}...`
+                    : language === 'tr'
+                    ? 'Örn: Salonu büyüt, Girişi sağa al, Daha ferah yap...'
+                    : 'e.g. Enlarge living room, Move entrance right...'
+                }
+                disabled={isRefining}
+                className="flex-1 min-w-[150px] sm:min-w-[260px] text-xs px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white text-gray-800 placeholder-gray-400"
+              />
+              <button
+                type="submit"
+                disabled={isRefining || !refinePrompt.trim()}
+                className="flex items-center gap-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isRefining ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                <span>{language === 'tr' ? 'Uygula' : 'Apply'}</span>
+              </button>
+            </form>
+
+            {/* Quick Presets & Room Lock Status */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {localRooms.some((r) => r.locked) && (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-xs">
+                  <Lock className="w-2.5 h-2.5 text-amber-600" />
+                  {localRooms.filter((r) => r.locked).length}{' '}
+                  {language === 'tr' ? 'oda kilitli (korunuyor)' : 'rooms locked (protected)'}
+                </span>
+              )}
+              {[
+                language === 'tr' ? 'Salonu büyüt' : 'Enlarge living room',
+                language === 'tr' ? 'Girişi sağa al' : 'Move entrance right',
+                language === 'tr' ? 'Daha ferah yap' : 'Make more spacious',
+                language === 'tr' ? 'Ebeveyn odasını genişlet' : 'Expand master bedroom',
+              ].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  disabled={isRefining}
+                  onClick={() => handleQuickRefine(preset)}
+                  className="px-2 py-0.5 rounded-lg bg-white/95 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 border border-gray-200 text-[10px] font-medium text-gray-600 shadow-xs transition-all backdrop-blur-xs active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  ⚡ {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Notification Feedback Toast */}
+            {refineFeedback && (
+              <div className="px-3 py-1 rounded-xl bg-slate-900/90 text-white text-xs font-medium shadow-xl border border-slate-700 flex items-center gap-1.5 animate-fade-in">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{refineFeedback}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { genAI, MODEL, hasRealApiKey } from '@/lib/gemini';
+import { refineFloorPlanWithGemini } from '@/lib/gemini';
 import { generateSVG, FloorPlanLayout, RoomLayout, getCleanRoomLabel } from '@/lib/svg-generator';
-import { ARCHITECTURAL_AI_SYSTEM_PROMPT } from '@/lib/architectural-knowledge';
 import { prisma } from '@/lib/db';
 
 const CHAT_SYSTEM_PROMPT = `You are a Principal Architect revising an architectural floor plan based on a client's specific design request.
@@ -200,47 +199,16 @@ export async function POST(req: NextRequest) {
     let reply = '';
     const lang = (language as 'tr' | 'en') || 'tr';
 
-    // 1. Try Gemini AI if available
-    if (hasRealApiKey && genAI) {
-      try {
-        const userMessage = `Current Floor Plan JSON:
-${JSON.stringify(currentLayout, null, 2)}
+    // 1. Differential refinement with Gemini (and procedural fallback), protecting locked rooms
+    const refineResult = await refineFloorPlanWithGemini({
+      currentLayout,
+      instruction: message,
+      language: lang,
+    });
 
-CLIENT DESIGN REQUEST: "${message}"
-
-Language: ${lang === 'tr' ? 'Turkish (return all room labels in Turkish)' : 'English (return all room labels in English)'}.
-Update the layout according to Neufert standards and architectural rules. Return ONLY the raw valid JSON object.`;
-
-        const response = await genAI.models.generateContent({
-          model: MODEL,
-          contents: [
-            { role: 'user', parts: [{ text: CHAT_SYSTEM_PROMPT }] },
-            { role: 'user', parts: [{ text: userMessage }] },
-          ],
-          config: {
-            temperature: 0.3,
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const rawText = response.text ?? '';
-        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-
-        if (parsed.rooms && Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
-          parsed.rooms = parsed.rooms.map((r: RoomLayout) => ({
-            ...r,
-            label: getCleanRoomLabel(r, lang),
-          }));
-          updatedLayout = parsed;
-          reply =
-            lang === 'tr'
-              ? `Kat planınız "${message}" talebinize göre mimari standartlarda güncellendi.`
-              : `Your floor plan has been updated with architectural precision for "${message}".`;
-        }
-      } catch (geminiErr) {
-        console.warn('Gemini chat failed, falling back to architectural rule engine:', geminiErr);
-      }
+    if (refineResult) {
+      updatedLayout = refineResult.updatedLayout;
+      reply = refineResult.reply;
     }
 
     // 2. Fallback to architectural rule engine
