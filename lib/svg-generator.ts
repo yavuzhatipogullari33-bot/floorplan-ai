@@ -148,7 +148,7 @@ export function calculateRoomArea(room: RoomLayout, scale: number): number {
 }
 
 export const CELL_SIZE = 60; // pixels per grid unit
-export const PADDING = 60; // extra padding for architectural dimensions
+export const PADDING = 70; // extra padding for structural axes and architectural dimensions
 export const WALL_THICKNESS = 4.0;
 export const DEFAULT_DOOR_SIZE = 24;
 export const DEFAULT_WINDOW_SIZE = 28;
@@ -426,12 +426,151 @@ function renderDimensionLines(layout: FloorPlanLayout): string {
 }
 
 /**
+ * TAŞIYICI AKS ÇİZGİLERİ VE AKS BALONLARI (STRUCTURAL GRID & AXIS BUBBLES)
+ * Düşeyde 1, 2, 3... ve yatayda A, B, C... kesikli taşıyıcı merkez aksları
+ */
+function renderStructuralAxes(layout: FloorPlanLayout): string {
+  const { rooms } = layout;
+  if (!rooms || rooms.length === 0) return '';
+
+  const minX = Math.min(...rooms.map((r) => r.x));
+  const maxX = Math.max(...rooms.map((r) => r.x + r.w));
+  const minY = Math.min(...rooms.map((r) => r.y));
+  const maxY = Math.max(...rooms.map((r) => r.y + r.h));
+
+  const startX = PADDING + minX * CELL_SIZE;
+  const startY = PADDING + minY * CELL_SIZE;
+  const planW = (maxX - minX) * CELL_SIZE;
+  const planH = (maxY - minY) * CELL_SIZE;
+
+  // Collect key X and Y coordinates where walls/columns exist
+  const rawX = new Set<number>();
+  const rawY = new Set<number>();
+
+  for (const r of rooms) {
+    if (r.polygon && r.polygon.length >= 3) {
+      for (const [px, py] of r.polygon) {
+        rawX.add(px);
+        rawY.add(py);
+      }
+    } else {
+      rawX.add(r.x);
+      rawX.add(r.x + r.w);
+      rawY.add(r.y);
+      rawY.add(r.y + r.h);
+    }
+  }
+
+  // Filter coordinates so axis lines are not cluttered (minimum 2.0 grid units apart)
+  const sortedX = Array.from(rawX).sort((a, b) => a - b);
+  const axesX: number[] = [];
+  for (const x of sortedX) {
+    if (axesX.length === 0 || x - axesX[axesX.length - 1] >= 2.0) {
+      axesX.push(x);
+    }
+  }
+
+  const sortedY = Array.from(rawY).sort((a, b) => a - b);
+  const axesY: number[] = [];
+  for (const y of sortedY) {
+    if (axesY.length === 0 || y - axesY[axesY.length - 1] >= 2.0) {
+      axesY.push(y);
+    }
+  }
+
+  let svg = '\n    <!-- Taşıyıcı Aks Çizgileri ve Aks Balonları -->\n    <g class="structural-axes" pointer-events="none">\n';
+
+  const axisR = 9;
+  const topY = startY - 45;
+  const botY = startY + planH + 45;
+  const leftX = startX - 45;
+  const rightX = startX + planW + 45;
+
+  // 1. Düşey Akslar (1, 2, 3...)
+  axesX.forEach((gx, idx) => {
+    const px = PADDING + gx * CELL_SIZE;
+    const label = (idx + 1).toString();
+
+    // Axis line (dashed center line - ISO architectural standard)
+    svg += `      <line x1="${px}" y1="${topY + axisR}" x2="${px}" y2="${botY - axisR}" stroke="#94A3B8" stroke-width="0.8" stroke-dasharray="8,3,2,3"/>\n`;
+
+    // Top Axis Bubble
+    svg += `      <circle cx="${px}" cy="${topY}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
+    svg += `      <text x="${px}" y="${topY + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+
+    // Bottom Axis Bubble
+    svg += `      <circle cx="${px}" cy="${botY}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
+    svg += `      <text x="${px}" y="${botY + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+  });
+
+  // 2. Yatay Akslar (A, B, C...)
+  const letters = 'ABCDEFGHJKLMNPRSTUVWXYZ';
+  axesY.forEach((gy, idx) => {
+    const py = PADDING + gy * CELL_SIZE;
+    const label = letters[idx % letters.length];
+
+    // Axis line
+    svg += `      <line x1="${leftX + axisR}" y1="${py}" x2="${rightX - axisR}" y2="${py}" stroke="#94A3B8" stroke-width="0.8" stroke-dasharray="8,3,2,3"/>\n`;
+
+    // Left Axis Bubble
+    svg += `      <circle cx="${leftX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
+    svg += `      <text x="${leftX}" y="${py + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+
+    // Right Axis Bubble
+    svg += `      <circle cx="${rightX}" cy="${py}" r="${axisR}" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>\n`;
+    svg += `      <text x="${rightX}" y="${py + 3.2}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0F172A">${label}</text>\n`;
+  });
+
+  svg += '    </g>\n';
+  return svg;
+}
+
+/**
+ * TAŞIYICI KOLON VE PERDE LEKE GÖSTERİMLERİ (STRUCTURAL REINFORCED COLUMNS)
+ * Duvar birleşimlerinde ve aks düğüm noktalarında betonarme kolon/perde lekesi
+ */
+function renderStructuralColumns(layout: FloorPlanLayout): string {
+  const { rooms } = layout;
+  if (!rooms || rooms.length === 0) return '';
+
+  const corners = new Set<string>();
+
+  for (const r of rooms) {
+    if (r.polygon && r.polygon.length >= 3) {
+      for (const [px, py] of r.polygon) {
+        corners.add(`${px},${py}`);
+      }
+    } else {
+      corners.add(`${r.x},${r.y}`);
+      corners.add(`${r.x + r.w},${r.y}`);
+      corners.add(`${r.x + r.w},${r.y + r.h}`);
+      corners.add(`${r.x},${r.y + r.h}`);
+    }
+  }
+
+  let svg = '\n    <!-- Taşıyıcı Kolon ve Perde Gösterimleri -->\n    <g class="structural-columns" pointer-events="none">\n';
+  const colSize = 10; // ~25x25cm architectural column
+
+  corners.forEach((coordStr) => {
+    const [gx, gy] = coordStr.split(',').map(Number);
+    const px = PADDING + gx * CELL_SIZE;
+    const py = PADDING + gy * CELL_SIZE;
+
+    // Betonarme Kolon (Solid Dark Charcoal with subtle boundary)
+    svg += `      <rect x="${px - colSize / 2}" y="${py - colSize / 2}" width="${colSize}" height="${colSize}" fill="#0F172A" stroke="#475569" stroke-width="0.8" rx="1"/>\n`;
+  });
+
+  svg += '    </g>\n';
+  return svg;
+}
+
+/**
  * MAIN GENERATE SVG FUNCTION
  */
 export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): string {
   const { rooms, gridWidth, gridHeight, scale } = layout;
-  const svgWidth = Math.max(gridWidth * CELL_SIZE + PADDING * 2 + 40, 750);
-  const svgHeight = Math.max(gridHeight * CELL_SIZE + PADDING * 2 + 60, 560);
+  const svgWidth = Math.max(gridWidth * CELL_SIZE + PADDING * 2 + 70, 840);
+  const svgHeight = Math.max(gridHeight * CELL_SIZE + PADDING * 2 + 90, 620);
 
   let roomsSvg = '';
   let furnitureSvg = '';
@@ -559,10 +698,16 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     gridLines += `<line x1="${PADDING}" y1="${gy * CELL_SIZE + PADDING}" x2="${gridWidth * CELL_SIZE + PADDING}" y2="${gy * CELL_SIZE + PADDING}" stroke="#F1F5F9" stroke-width="0.8"/>`;
   }
 
-  // 3. Dimension lines
+  // 3. Structural Axes (Taşıyıcı Aks Çizgileri ve Aks Balonları)
+  const structuralAxes = renderStructuralAxes(layout);
+
+  // 4. Structural Columns (Taşıyıcı Kolon ve Perde Leke Gösterimleri)
+  const structuralColumns = renderStructuralColumns(layout);
+
+  // 5. Dimension lines
   const dimensionLines = renderDimensionLines(layout);
 
-  // 4. Scale bar & Title stamp (Mimari Pafta Başlığı)
+  // 6. Scale bar & Title stamp (Mimari Pafta Başlığı)
   const scaleBarWidth = CELL_SIZE * 2; // 2 units
   const scaleLabel = `${(scale * 2).toFixed(1)}m`;
   const scaleX = PADDING;
@@ -587,7 +732,7 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     </g>
   `;
 
-  // 5. Professional North Arrow (Kuzey Oku)
+  // 7. Professional North Arrow (Kuzey Oku)
   const northX = svgWidth - PADDING - 20;
   const northY = PADDING - 10;
   const compass = `
@@ -612,11 +757,17 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     <!-- Background Architectural Grid -->
     ${gridLines}
 
-    <!-- Dimension Lines -->
+    <!-- Structural Axis Lines & Axis Bubbles (Taşıyıcı Akslar) -->
+    ${structuralAxes}
+
+    <!-- Dimension Lines (Kot ve Ölçülendirme Çizgileri) -->
     ${dimensionLines}
 
-    <!-- Room Walls & Floors -->
+    <!-- Room Walls & Floors (Zemin ve Duvarlar) -->
     ${roomsSvg}
+
+    <!-- Structural Columns & Shear Walls (Taşıyıcı Kolon ve Perde Lekeleri) -->
+    ${structuralColumns}
 
     <!-- Architectural Furniture (Tefrişat) -->
     ${furnitureSvg}
@@ -759,3 +910,533 @@ export function generateWindowSVG(
       return '';
   }
 }
+
+export interface ArchitecturalLayoutParams {
+  bedrooms?: number;
+  bathrooms?: number;
+  totalArea?: number;
+  style?: string;
+  extras?: string[];
+  lang?: 'tr' | 'en';
+}
+
+/**
+ * ALGORİTMİK YERLEŞİM MOTORU (DYNAMIC ARCHITECTURAL PROCEDURAL ENGINE)
+ * - Dinamik Kütle Parçalama: Kütle sınırlarına en az 1-2 adet teras oyuğu / iç avlu / ışıklık
+ *   ve kademeli cephe kırılmaları (facade setbacks / jogs) ekler. Asla monoton kutu üretmez.
+ * - Mimari Hiyerarşi & Sirkülasyon: Koridorları ölü alan olmaktan çıkaran merkezi ana arter omurgası
+ *   (Central Spine Corridor / Gallery).
+ * - Neufert Ergonomik Kapı Hizalaması: Kapılar oda köşelerine (0.15 veya 0.85) veya koridor aksı
+ *   sonuna açılır; odanın ortasına veya tefrişatı kesecek yere konulmaz.
+ * - Islak Hacim Kümelenmesi: Banyo, mutfak ve çamaşır alanları ortak tesisat şaftı etrafında toplanır.
+ */
+export function generateArchitecturalLayout(params: ArchitecturalLayoutParams = {}): FloorPlanLayout {
+  const {
+    bedrooms = 3,
+    bathrooms = 2,
+    totalArea = 120,
+    extras = [],
+    lang = 'tr',
+  } = params;
+
+  const numBeds = Math.max(1, Math.min(Number(bedrooms) || 3, 5));
+  const rooms: RoomLayout[] = [];
+
+  let gridW = 18;
+  let gridH = 14;
+
+  if (numBeds === 1) {
+    // -------------------------------------------------------------
+    // TYPOLOGY 1: 1+1 ARTICULATED SUITE (Kademeli Geri Çekilmeli Teraslı)
+    // -------------------------------------------------------------
+    gridW = 14;
+    gridH = 11;
+
+    // 1. Central Foyer & Spine (Ana Giriş & Dağılım Aksı)
+    rooms.push({
+      id: 'foyer',
+      label: lang === 'tr' ? 'Antre / Giriş' : 'Foyer / Entry',
+      type: 'hallway',
+      x: 3.5,
+      y: 4.5,
+      w: 3.5,
+      h: 2.5,
+      doors: [
+        { wall: 'bottom', position: 0.15, width: 28 }, // Main front door (corner aligned)
+        { wall: 'top', position: 0.85, width: 26 },    // Door into social spine
+        { wall: 'left', position: 0.5, width: 24 },    // Door to bathroom
+      ],
+    });
+
+    // 2. Living & Dining Room (Manzara Salonu - Kademeli Dışa Taşan Kütle)
+    rooms.push({
+      id: 'living',
+      label: lang === 'tr' ? 'Manzara Salonu' : 'Panoramic Living',
+      type: 'living',
+      x: 7,
+      y: 0,
+      w: 6.5,
+      h: 5.5,
+      doors: [
+        { wall: 'left', position: 0.85, width: 26 },
+        { wall: 'bottom', position: 0.85, width: 32 }, // Direct opening to terrace notch
+      ],
+      windows: [
+        { wall: 'top', position: 0.5, width: 44 },
+        { wall: 'right', position: 0.5, width: 36 },
+      ],
+    });
+
+    // 3. Kitchen & Dining Island (Ada Mutfak - Tesisat Şaftına Bitişik)
+    rooms.push({
+      id: 'kitchen',
+      label: lang === 'tr' ? 'Açık Mutfak & Ada' : 'Open Kitchen & Island',
+      type: 'kitchen',
+      x: 3.5,
+      y: 0,
+      w: 3.5,
+      h: 4.5,
+      doors: [{ wall: 'right', position: 0.5, width: 26 }],
+      windows: [{ wall: 'top', position: 0.5, width: 28 }],
+    });
+
+    // 4. VOID 1: Recessed Terrace Notch (Teras Oyuğu / Veranda)
+    // Kütle sınırında odaya komşu nefes alan derin dış teras
+    rooms.push({
+      id: 'terrace-recessed',
+      label: lang === 'tr' ? 'Gömme Bahçe Terası' : 'Recessed Garden Terrace',
+      type: 'balcony',
+      x: 7,
+      y: 5.5,
+      w: 5.5,
+      h: 3.5,
+      doors: [{ wall: 'top', position: 0.85, width: 32 }],
+    });
+
+    // 5. Bedroom (Gece Bölgesi - Özel Köşe Kanadı)
+    rooms.push({
+      id: 'master-bed',
+      label: lang === 'tr' ? 'Yatak Odası' : 'Master Bedroom',
+      type: 'bedroom',
+      x: 0,
+      y: 0,
+      w: 3.5,
+      h: 4.5,
+      doors: [{ wall: 'right', position: 0.85, width: 24 }],
+      windows: [
+        { wall: 'top', position: 0.5, width: 32 },
+        { wall: 'left', position: 0.5, width: 32 },
+      ],
+    });
+
+    // 6. Main Bath (Ortak Tesisat Şaftlı Islak Hacim)
+    rooms.push({
+      id: 'bath-main',
+      label: lang === 'tr' ? 'Banyo' : 'Bathroom',
+      type: 'bathroom',
+      x: 0,
+      y: 4.5,
+      w: 3.5,
+      h: 2.5,
+      doors: [{ wall: 'right', position: 0.15, width: 22 }],
+      windows: [{ wall: 'left', position: 0.5, width: 20 }],
+    });
+
+    // 7. VOID 2: Front Entrance Courtyard Notch (Giriş Ön Avlu Oyuğu)
+    // Kütle sınırında binayı kutu olmaktan çıkaran geri çekilme (jog)
+    rooms.push({
+      id: 'entry-court',
+      label: lang === 'tr' ? 'Giriş Avlusu' : 'Entry Courtyard',
+      type: 'balcony',
+      x: 0,
+      y: 7,
+      w: 3.5,
+      h: 2.5,
+      doors: [{ wall: 'right', position: 0.5, width: 26 }],
+    });
+
+  } else if (numBeds === 2) {
+    // -------------------------------------------------------------
+    // TYPOLOGY 2: 2+1 COURTYARD & SPINE RESIDENCE (İç Avlu & Teras Oyuğu)
+    // -------------------------------------------------------------
+    gridW = 16;
+    gridH = 12;
+
+    // 1. Central Circulation Spine (Ana Arter Koridor Omurgası)
+    rooms.push({
+      id: 'corridor-spine',
+      label: lang === 'tr' ? 'Merkez Galeri / Hol' : 'Central Spine Gallery',
+      type: 'hallway',
+      x: 4.5,
+      y: 4,
+      w: 6.5,
+      h: 2,
+      doors: [
+        { wall: 'bottom', position: 0.15, width: 26 }, // From foyer
+        { wall: 'right', position: 0.5, width: 28 },  // Terminal end to living
+        { wall: 'left', position: 0.5, width: 24 },   // Terminal end to master
+        { wall: 'top', position: 0.15, width: 22 },   // To kitchen
+      ],
+    });
+
+    // 2. Foyer Entry
+    rooms.push({
+      id: 'foyer',
+      label: lang === 'tr' ? 'Antre' : 'Foyer',
+      type: 'hallway',
+      x: 4.5,
+      y: 6,
+      w: 3.5,
+      h: 2.5,
+      doors: [
+        { wall: 'bottom', position: 0.15, width: 28 }, // Main front door
+        { wall: 'top', position: 0.15, width: 26 },
+      ],
+    });
+
+    // 3. Living Room (Geniş Bahçe Salonu - Güneye Açılan Kütle)
+    rooms.push({
+      id: 'living',
+      label: lang === 'tr' ? 'Bahçe Salonu' : 'Garden Living',
+      type: 'living',
+      x: 11,
+      y: 0,
+      w: 5,
+      h: 6,
+      doors: [
+        { wall: 'left', position: 0.85, width: 28 },
+        { wall: 'bottom', position: 0.85, width: 32 }, // Direct to terrace notch
+      ],
+      windows: [
+        { wall: 'top', position: 0.5, width: 44 },
+        { wall: 'right', position: 0.5, width: 40 },
+      ],
+    });
+
+    // 4. Kitchen & Dining
+    rooms.push({
+      id: 'kitchen',
+      label: lang === 'tr' ? 'Ada Mutfak & Yemek' : 'Kitchen & Dining Island',
+      type: 'kitchen',
+      x: 4.5,
+      y: 0,
+      w: 6.5,
+      h: 4,
+      doors: [
+        { wall: 'bottom', position: 0.85, width: 24 },
+        { wall: 'right', position: 0.5, width: 26 },
+      ],
+      windows: [{ wall: 'top', position: 0.5, width: 40 }],
+    });
+
+    // 5. VOID 1: Deep Recessed Garden Terrace (Teras Oyuğu)
+    rooms.push({
+      id: 'terrace-veranda',
+      label: lang === 'tr' ? 'Havuzlu Veranda Terası' : 'Poolside Veranda Terrace',
+      type: 'balcony',
+      x: 8,
+      y: 6,
+      w: 6.5,
+      h: 4,
+      doors: [{ wall: 'top', position: 0.85, width: 32 }],
+    });
+
+    // 6. Master Bedroom Suite
+    rooms.push({
+      id: 'master-bed',
+      label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Suite',
+      type: 'bedroom',
+      x: 0,
+      y: 0,
+      w: 4.5,
+      h: 4.5,
+      doors: [{ wall: 'bottom', position: 0.15, width: 24 }],
+      windows: [
+        { wall: 'top', position: 0.5, width: 36 },
+        { wall: 'left', position: 0.5, width: 36 },
+      ],
+    });
+
+    // 7. En-suite Bath
+    rooms.push({
+      id: 'bath-ensuite',
+      label: lang === 'tr' ? 'Ebeveyn Banyosu' : 'En-suite Bath',
+      type: 'bathroom',
+      x: 0,
+      y: 4.5,
+      w: 2.2,
+      h: 2.5,
+      doors: [{ wall: 'top', position: 0.5, width: 22 }],
+      windows: [{ wall: 'left', position: 0.5, width: 18 }],
+    });
+
+    // 8. Main Bathroom (Ortak Tesisat Duvarı)
+    rooms.push({
+      id: 'bath-main',
+      label: lang === 'tr' ? 'Genel Banyo' : 'Main Bath',
+      type: 'bathroom',
+      x: 2.2,
+      y: 4.5,
+      w: 2.3,
+      h: 2.5,
+      doors: [{ wall: 'right', position: 0.15, width: 22 }],
+    });
+
+    // 9. Bedroom 2 (Çocuk / Çalışma Odası)
+    rooms.push({
+      id: 'bed-2',
+      label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2',
+      type: 'bedroom',
+      x: 0,
+      y: 7,
+      w: 4.5,
+      h: 4.5,
+      doors: [{ wall: 'top', position: 0.85, width: 24 }],
+      windows: [
+        { wall: 'left', position: 0.5, width: 32 },
+        { wall: 'bottom', position: 0.5, width: 32 },
+      ],
+    });
+
+    // 10. VOID 2: Green Courtyard Lightwell (Işıklık / İç Bahçe Oyuğu)
+    rooms.push({
+      id: 'inner-garden',
+      label: lang === 'tr' ? 'İç Bahçe / Işıklık' : 'Inner Zen Courtyard',
+      type: 'balcony',
+      x: 4.5,
+      y: 8.5,
+      w: 3.5,
+      h: 2.5,
+      doors: [{ wall: 'top', position: 0.5, width: 26 }],
+    });
+
+  } else {
+    // -------------------------------------------------------------
+    // TYPOLOGY 3: 3+1 / 4+1 DYNAMIC SPINE VILLA (Heykelsi Kütle Parçalamalı)
+    // -------------------------------------------------------------
+    gridW = 18;
+    gridH = 14;
+
+    // 1. The Grand Architectural Spine Gallery (Ana Arter Koridor Aksı)
+    rooms.push({
+      id: 'corridor-spine',
+      label: lang === 'tr' ? 'Ana Sirkülasyon Aksı / Galeri' : 'Central Spine Gallery',
+      type: 'hallway',
+      x: 4.5,
+      y: 4.5,
+      w: 8.5,
+      h: 2.2,
+      doors: [
+        { wall: 'bottom', position: 0.15, width: 28 }, // Connected to Foyer
+        { wall: 'right', position: 0.5, width: 30 },  // Terminal portal into Living
+        { wall: 'left', position: 0.5, width: 26 },   // Terminal portal into Master Suite
+        { wall: 'top', position: 0.15, width: 24 },   // To Dining/Kitchen
+        { wall: 'bottom', position: 0.85, width: 24 },// To Guest Bed / Study
+      ],
+    });
+
+    // 2. Entrance Foyer (Giriş Antresi & Vestiyer)
+    rooms.push({
+      id: 'foyer',
+      label: lang === 'tr' ? 'Giriş Holü & Vestiyer' : 'Entry Foyer & Wardrobe',
+      type: 'hallway',
+      x: 4.5,
+      y: 6.7,
+      w: 3.5,
+      h: 3,
+      doors: [
+        { wall: 'bottom', position: 0.15, width: 30 }, // Main entrance door (Neufert corner offset)
+        { wall: 'top', position: 0.15, width: 28 },
+      ],
+    });
+
+    // 3. Living Room (Manzara Salonu - Kademeli Kırılmalı / Dışa Taşan Kütle)
+    rooms.push({
+      id: 'living',
+      label: lang === 'tr' ? 'Panoramik Salon' : 'Panoramic Living Room',
+      type: 'living',
+      x: 13,
+      y: 0,
+      w: 5,
+      h: 6.7,
+      doors: [
+        { wall: 'left', position: 0.85, width: 28 },
+        { wall: 'bottom', position: 0.85, width: 36 }, // Large sliding glass doors to terrace
+      ],
+      windows: [
+        { wall: 'top', position: 0.5, width: 44 },
+        { wall: 'right', position: 0.5, width: 48 },
+      ],
+    });
+
+    // 4. Dining Area (Yemek Salonu)
+    rooms.push({
+      id: 'dining',
+      label: lang === 'tr' ? 'Yemek Salonu' : 'Formal Dining',
+      type: 'dining',
+      x: 8.5,
+      y: 0,
+      w: 4.5,
+      h: 4.5,
+      doors: [
+        { wall: 'right', position: 0.5, width: 28 },
+        { wall: 'left', position: 0.5, width: 26 },
+      ],
+      windows: [{ wall: 'top', position: 0.5, width: 36 }],
+    });
+
+    // 5. Kitchen & Breakfast Island (Mutfak & Kiler)
+    rooms.push({
+      id: 'kitchen',
+      label: lang === 'tr' ? 'Şef Mutfağı & Ada' : 'Chef Kitchen & Island',
+      type: 'kitchen',
+      x: 4.5,
+      y: 0,
+      w: 4,
+      h: 4.5,
+      doors: [
+        { wall: 'right', position: 0.5, width: 26 },
+        { wall: 'bottom', position: 0.15, width: 24 },
+      ],
+      windows: [{ wall: 'top', position: 0.5, width: 32 }],
+    });
+
+    // 6. VOID 1: Deep Covered Veranda / Terrace Notch (Teras Oyuğu)
+    // Living room ve bahçe arasında derinlemesine içeri oyulmuş lüks dış mekan
+    rooms.push({
+      id: 'terrace-veranda',
+      label: lang === 'tr' ? 'Kademeli Peyzaj Terası' : 'Cascading Landscape Terrace',
+      type: 'balcony',
+      x: 8,
+      y: 6.7,
+      w: 6.5,
+      h: 4.5,
+      doors: [{ wall: 'top', position: 0.85, width: 36 }],
+    });
+
+    // 7. Master Suite (Ebeveyn Yatak Odası - Özel Bahçe Kanadı)
+    rooms.push({
+      id: 'master-bed',
+      label: lang === 'tr' ? 'Ebeveyn Süiti' : 'Master Bedroom Suite',
+      type: 'bedroom',
+      x: 0,
+      y: 0,
+      w: 4.5,
+      h: 5.5,
+      doors: [{ wall: 'bottom', position: 0.15, width: 24 }],
+      windows: [
+        { wall: 'top', position: 0.5, width: 40 },
+        { wall: 'left', position: 0.5, width: 40 },
+      ],
+    });
+
+    // 8. En-suite Bathroom & Walk-in Closet (Ebeveyn Banyosu)
+    rooms.push({
+      id: 'bath-ensuite',
+      label: lang === 'tr' ? 'Ebeveyn Banyosu' : 'En-suite Luxury Bath',
+      type: 'bathroom',
+      x: 0,
+      y: 5.5,
+      w: 2.5,
+      h: 3,
+      doors: [{ wall: 'top', position: 0.5, width: 22 }],
+      windows: [{ wall: 'left', position: 0.5, width: 20 }],
+    });
+
+    // 9. Main Bathroom (Ortak Tesisat Şaftı Duvarı)
+    rooms.push({
+      id: 'bath-main',
+      label: lang === 'tr' ? 'Genel Banyo' : 'Main Bathroom',
+      type: 'bathroom',
+      x: 2.5,
+      y: 5.5,
+      w: 2,
+      h: 3,
+      doors: [{ wall: 'right', position: 0.15, width: 22 }],
+    });
+
+    // 10. VOID 2: Central Lightwell / Atrium Notch (İç Avlu / Işıklık)
+    // Gece koridoru ve ebeveyn süiti arasında doğal ışık sağlayan iç avlu oyuğu
+    rooms.push({
+      id: 'atrium-notch',
+      label: lang === 'tr' ? 'İç Işıklık / Avlu' : 'Inner Lightwell / Atrium',
+      type: 'balcony',
+      x: 0,
+      y: 8.5,
+      w: 3,
+      h: 2.5,
+      doors: [{ wall: 'right', position: 0.5, width: 24 }],
+    });
+
+    // 11. Bedroom 2 (Çocuk Yatak Odası)
+    rooms.push({
+      id: 'bed-2',
+      label: lang === 'tr' ? 'Yatak Odası 2' : 'Bedroom 2',
+      type: 'bedroom',
+      x: 0,
+      y: 11,
+      w: 4.5,
+      h: 3,
+      doors: [{ wall: 'top', position: 0.85, width: 24 }],
+      windows: [
+        { wall: 'left', position: 0.5, width: 32 },
+        { wall: 'bottom', position: 0.5, width: 32 },
+      ],
+    });
+
+    // 12. Bedroom 3 / Guest Suite (Misafir / Çocuk Odası)
+    rooms.push({
+      id: 'bed-3',
+      label: lang === 'tr' ? 'Yatak Odası 3' : 'Bedroom 3',
+      type: 'bedroom',
+      x: 4.5,
+      y: 9.7,
+      w: 4,
+      h: 4.3,
+      doors: [{ wall: 'top', position: 0.15, width: 24 }],
+      windows: [{ wall: 'bottom', position: 0.5, width: 32 }],
+    });
+
+    // 13. If 4+ bedrooms requested: Study / Guest Wing
+    if (numBeds >= 4) {
+      rooms.push({
+        id: 'office-bed',
+        label: lang === 'tr' ? 'Çalışma / Misafir Odası' : 'Home Office / Guest Suite',
+        type: 'office',
+        x: 8.5,
+        y: 11.2,
+        w: 4.5,
+        h: 2.8,
+        doors: [{ wall: 'top', position: 0.15, width: 24 }],
+        windows: [{ wall: 'bottom', position: 0.5, width: 32 }],
+      });
+      gridH = 15;
+    }
+  }
+
+  // Calculate precise scale to match targetArea
+  const totalGridUnits = rooms.reduce((acc, r) => {
+    if (r.polygon && r.polygon.length >= 3) {
+      let area = 0;
+      const n = r.polygon.length;
+      for (let i = 0; i < n; i++) {
+        const [x1, y1] = r.polygon[i];
+        const [x2, y2] = r.polygon[(i + 1) % n];
+        area += x1 * y2 - x2 * y1;
+      }
+      return acc + Math.abs(area) / 2;
+    }
+    return acc + (r.w * r.h);
+  }, 0);
+
+  const scale = totalGridUnits > 0 ? Math.sqrt(totalArea / totalGridUnits) : 1.2;
+
+  return {
+    rooms,
+    totalArea,
+    gridWidth: gridW,
+    gridHeight: gridH,
+    scale,
+  };
+}
+
