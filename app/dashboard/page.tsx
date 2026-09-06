@@ -115,6 +115,22 @@ export default function DashboardPage() {
     }
   }
 
+  async function createProjectWithWizard() {
+    setCreating(true);
+    try {
+      const defaultName = language === 'tr' ? 'BIM Kat Planı Projesi' : 'BIM Floor Plan Project';
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: defaultName }),
+      });
+      const data = await res.json();
+      router.push(`/editor/${data.project.id}?wizard=open`);
+    } catch {
+      setCreating(false);
+    }
+  }
+
   async function deleteProject(id: string, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -233,9 +249,18 @@ export default function DashboardPage() {
             <LanguageSelector />
 
             <button
+              onClick={createProjectWithWizard}
+              disabled={creating}
+              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-sm rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{language === 'tr' ? 'Kurulum Sihirbazı' : 'Setup Wizard'}</span>
+            </button>
+
+            <button
               onClick={createProject}
               disabled={creating}
-              className="btn-primary flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md transition-all active:scale-95"
+              className="btn-primary flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               {creating ? t.dashboard.creating : t.dashboard.newProject}
@@ -255,14 +280,24 @@ export default function DashboardPage() {
             <p className="text-gray-500 text-sm mb-6 max-w-sm mx-auto">
               {t.dashboard.emptySubtitle}
             </p>
-            <button
-              onClick={createProject}
-              disabled={creating}
-              className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md"
-            >
-              <Plus className="w-4 h-4" />
-              {t.dashboard.createFirstBtn}
-            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={createProjectWithWizard}
+                disabled={creating}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl shadow-md text-sm transition-all active:scale-95"
+              >
+                <Sparkles className="w-4 h-4" />
+                {language === 'tr' ? 'Kurulum Sihirbazı ile Başla' : 'Start with Setup Wizard'}
+              </button>
+              <button
+                onClick={createProject}
+                disabled={creating}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                {t.dashboard.createFirstBtn}
+              </button>
+            </div>
           </div>
         )}
 

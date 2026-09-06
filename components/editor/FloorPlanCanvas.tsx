@@ -19,12 +19,16 @@ import {
 } from 'lucide-react';
 import {
   FloorPlanLayout,
+  FloorLevel,
   RoomLayout,
   DoorPlacement,
   WindowPlacement,
   generateSVG,
   getCleanRoomLabel,
   calculateRoomArea,
+  getActiveFloor,
+  setActiveFloor,
+  updateFloorRooms,
   ROOM_COLORS,
   CELL_SIZE,
   PADDING,
@@ -68,7 +72,9 @@ export interface DragFeedback {
   active: boolean;
   wall?: string;
   currentLengthM: string;
+  currentLengthCm?: string;
   deltaM: string;
+  deltaCm?: string;
   roomLabel: string;
   roomAreaM2: string;
   neighborLabel?: string;
@@ -79,6 +85,29 @@ export interface DragFeedback {
   guideline?: {
     orientation: 'vertical' | 'horizontal';
     val: number;
+  };
+  laserRay?: {
+    angle: number;
+    label: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+  nodeMerged?: boolean;
+  nodeMergePos?: {
+    x: number;
+    y: number;
+    label: string;
+  };
+  dimensionLine?: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    label: string;
+    w1: [number, number, number, number];
+    w2: [number, number, number, number];
   };
 }
 
@@ -375,6 +404,46 @@ export default function FloorPlanCanvas({
     setZoom((z) => Math.min(3, Math.max(0.3, z * delta)));
   }
 
+  // Multi-floor Ghost Trace State
+  const [showGhostTrace, setShowGhostTrace] = useState(true);
+
+  function handleSwitchFloor(targetLevel: number) {
+    if (!layout) return;
+    const currentFloors = layout.floors || [
+      {
+        level: 0,
+        name: 'Zemin Kat',
+        elevation: 0.0,
+        rooms: layout.rooms || [],
+        totalArea: layout.totalArea,
+      },
+    ];
+    const targetFloor = currentFloors.find((f) => f.level === targetLevel) || currentFloors[0];
+
+    const updatedLayout: FloorPlanLayout = {
+      ...layout,
+      activeLevel: targetLevel,
+      rooms: targetFloor.rooms,
+      totalArea: targetFloor.totalArea || layout.totalArea,
+      floors: currentFloors,
+    };
+
+    const lowerFloor = currentFloors.find((f) => f.level === targetLevel - 1);
+    const newSvg = generateSVG(updatedLayout, language, {
+      ghostRooms: lowerFloor?.rooms,
+      showGhostTrace,
+      activeLevel: targetLevel,
+      floorName: targetFloor.name,
+      elevation: targetFloor.elevation,
+    });
+
+    setLocalRooms(targetFloor.rooms);
+    setSelectedRoomId(null);
+    if (onLayoutChange) {
+      onLayoutChange(updatedLayout, newSvg);
+    }
+  }
+
   // Calculate & commit final layout to parent
   const commitLayoutChange = useCallback(
     (roomsToCommit: RoomLayout[]) => {
@@ -392,20 +461,30 @@ export default function FloorPlanCanvas({
         roomsToCommit.reduce((acc, r) => acc + r.w * r.h * scale * scale, 0)
       );
 
-      const updated: FloorPlanLayout = {
-        ...layout,
-        rooms: roomsToCommit,
-        gridWidth: maxGridX,
-        gridHeight: maxGridY,
-        totalArea,
-      };
+      const activeLvl = layout.activeLevel ?? 0;
+      const updatedWithFloors = updateFloorRooms(
+        {
+          ...layout,
+          gridWidth: Math.max(layout.gridWidth, maxGridX),
+          gridHeight: Math.max(layout.gridHeight, maxGridY),
+          totalArea,
+        },
+        activeLvl,
+        roomsToCommit
+      );
 
-      const newSvg = generateSVG(updated, language);
+      const lowerFloor = updatedWithFloors.floors?.find((f) => f.level === activeLvl - 1);
+      const newSvg = generateSVG(updatedWithFloors, language, {
+        ghostRooms: lowerFloor?.rooms,
+        showGhostTrace,
+        activeLevel: activeLvl,
+      });
+
       if (onLayoutChange) {
-        onLayoutChange(updated, newSvg);
+        onLayoutChange(updatedWithFloors, newSvg);
       }
     },
-    [layout, onLayoutChange, language]
+    [layout, onLayoutChange, language, showGhostTrace]
   );
 
   // Global Pointer Events for seamless 60FPS drag
@@ -431,54 +510,160 @@ export default function FloorPlanCanvas({
       const initial = state.initialRoom;
       if (!initial || !state.initialAllRooms) return;
 
-      // 2. MOVE ROOM (smooth continuous movement with magnetic docking snap)
-      if (state.mode === 'move-room') {
-        let newX = Math.max(0, Number((initial.x + deltaGridX).toFixed(2)));
-        let newY = Math.max(0, Number((initial.y + deltaGridY).toFixed(2)));
+      const scale = layout?.scale || 1.2;
+      const SNAP_15CM = 0.15 / scale; // 15 cm magnetic node snapping threshold
 
-        // Magnetic docking snap to other rooms
+      // --- LASER / ORTHO SNAP CALCULATION (0°, 45°, 90°) ---
+      let effDeltaGridX = deltaGridX;
+      let effDeltaGridY = deltaGridY;
+      let laserGuide: DragFeedback['laserRay'] = undefined;
+
+      const deltaAbsX = Math.abs(deltaGridX);
+      const deltaAbsY = Math.abs(deltaGridY);
+      if (deltaAbsX > 0.15 || deltaAbsY > 0.15) {
+        const rad = Math.atan2(deltaAbsY, deltaAbsX);
+        const deg = rad * (180 / Math.PI); // 0 to 90 degrees
+        const ANGLE_SNAP_TOLERANCE = 8.0;
+
+        if (deg <= ANGLE_SNAP_TOLERANCE) {
+          // 0° ORTHO (Horizontal Lock)
+          effDeltaGridY = 0;
+          const py = initial.y * CELL_SIZE + PADDING + (initial.h * CELL_SIZE) / 2;
+          laserGuide = {
+            angle: 0,
+            label: '0° ORTHO',
+            x1: 0,
+            y1: py,
+            x2: svgWidth,
+            y2: py,
+          };
+        } else if (deg >= 90 - ANGLE_SNAP_TOLERANCE) {
+          // 90° ORTHO (Vertical Lock)
+          effDeltaGridX = 0;
+          const px = initial.x * CELL_SIZE + PADDING + (initial.w * CELL_SIZE) / 2;
+          laserGuide = {
+            angle: 90,
+            label: '90° ORTHO',
+            x1: px,
+            y1: 0,
+            x2: px,
+            y2: svgHeight,
+          };
+        } else if (Math.abs(deg - 45) <= 6.0) {
+          // 45° BISECTOR (Diagonal Lock)
+          const signX = Math.sign(effDeltaGridX) || 1;
+          const signY = Math.sign(effDeltaGridY) || 1;
+          const avg = (deltaAbsX + deltaAbsY) / 2;
+          effDeltaGridX = signX * avg;
+          effDeltaGridY = signY * avg;
+          const cx = (initial.x + initial.w / 2) * CELL_SIZE + PADDING;
+          const cy = (initial.y + initial.h / 2) * CELL_SIZE + PADDING;
+          laserGuide = {
+            angle: 45,
+            label: '45° BISECTOR',
+            x1: cx - 400 * signX,
+            y1: cy - 400 * signY,
+            x2: cx + 400 * signX,
+            y2: cy + 400 * signY,
+          };
+        }
+      }
+
+      // 2. MOVE ROOM (smooth continuous movement with magnetic docking & 15cm node merging)
+      if (state.mode === 'move-room') {
+        let newX = Math.max(0, Number((initial.x + effDeltaGridX).toFixed(2)));
+        let newY = Math.max(0, Number((initial.y + effDeltaGridY).toFixed(2)));
+
+        let isNodeMerged = false;
+        let nodeMergePos: DragFeedback['nodeMergePos'] = undefined;
+
+        // 15cm Node Merging Check against other room corners
+        const myCorners = [
+          { x: newX, y: newY },
+          { x: newX + initial.w, y: newY },
+          { x: newX, y: newY + initial.h },
+          { x: newX + initial.w, y: newY + initial.h },
+        ];
+
+        for (const other of state.initialAllRooms) {
+          if (other.id === state.roomId) continue;
+          const otherCorners = [
+            { x: other.x, y: other.y },
+            { x: other.x + other.w, y: other.y },
+            { x: other.x, y: other.y + other.h },
+            { x: other.x + other.w, y: other.y + other.h },
+          ];
+
+          for (const mc of myCorners) {
+            for (const oc of otherCorners) {
+              const d = Math.hypot(mc.x - oc.x, mc.y - oc.y);
+              if (d <= SNAP_15CM) {
+                newX = Number((newX + (oc.x - mc.x)).toFixed(2));
+                newY = Number((newY + (oc.y - mc.y)).toFixed(2));
+                isNodeMerged = true;
+                nodeMergePos = {
+                  x: oc.x * CELL_SIZE + PADDING,
+                  y: oc.y * CELL_SIZE + PADDING,
+                  label: '15 cm Düğüm Birleşti (L-Köşe)',
+                };
+                break;
+              }
+            }
+            if (isNodeMerged) break;
+          }
+          if (isNodeMerged) break;
+        }
+
+        // Magnetic docking snap to other rooms (if not corner merged)
         const SNAP_DIST = 0.28;
         let guidelineV: number | undefined = undefined;
         let guidelineH: number | undefined = undefined;
 
-        for (const other of state.initialAllRooms) {
-          if (other.id === state.roomId) continue;
+        if (!isNodeMerged) {
+          for (const other of state.initialAllRooms) {
+            if (other.id === state.roomId) continue;
 
-          // Horizontal docking (flush to left, right, or collinear)
-          if (Math.abs(newX - (other.x + other.w)) < SNAP_DIST) {
-            newX = Number((other.x + other.w).toFixed(2));
-            guidelineV = newX * CELL_SIZE + PADDING;
-          } else if (Math.abs((newX + initial.w) - other.x) < SNAP_DIST) {
-            newX = Number((other.x - initial.w).toFixed(2));
-            guidelineV = other.x * CELL_SIZE + PADDING;
-          } else if (Math.abs(newX - other.x) < SNAP_DIST) {
-            newX = other.x;
-            guidelineV = other.x * CELL_SIZE + PADDING;
-          }
+            // Horizontal docking (flush to left, right, or collinear)
+            if (Math.abs(newX - (other.x + other.w)) < SNAP_DIST) {
+              newX = Number((other.x + other.w).toFixed(2));
+              guidelineV = newX * CELL_SIZE + PADDING;
+            } else if (Math.abs((newX + initial.w) - other.x) < SNAP_DIST) {
+              newX = Number((other.x - initial.w).toFixed(2));
+              guidelineV = other.x * CELL_SIZE + PADDING;
+            } else if (Math.abs(newX - other.x) < SNAP_DIST) {
+              newX = other.x;
+              guidelineV = other.x * CELL_SIZE + PADDING;
+            }
 
-          // Vertical docking (flush to top, bottom, or collinear)
-          if (Math.abs(newY - (other.y + other.h)) < SNAP_DIST) {
-            newY = Number((other.y + other.h).toFixed(2));
-            guidelineH = newY * CELL_SIZE + PADDING;
-          } else if (Math.abs((newY + initial.h) - other.y) < SNAP_DIST) {
-            newY = Number((other.y - initial.h).toFixed(2));
-            guidelineH = other.y * CELL_SIZE + PADDING;
-          } else if (Math.abs(newY - other.y) < SNAP_DIST) {
-            newY = other.y;
-            guidelineH = other.y * CELL_SIZE + PADDING;
+            // Vertical docking (flush to top, bottom, or collinear)
+            if (Math.abs(newY - (other.y + other.h)) < SNAP_DIST) {
+              newY = Number((other.y + other.h).toFixed(2));
+              guidelineH = newY * CELL_SIZE + PADDING;
+            } else if (Math.abs((newY + initial.h) - other.y) < SNAP_DIST) {
+              newY = Number((other.y - initial.h).toFixed(2));
+              guidelineH = other.y * CELL_SIZE + PADDING;
+            } else if (Math.abs(newY - other.y) < SNAP_DIST) {
+              newY = other.y;
+              guidelineH = other.y * CELL_SIZE + PADDING;
+            }
           }
         }
 
-        const scale = layout?.scale || 1.0;
         setLocalRooms((prev) =>
           prev.map((r) => (r.id === state.roomId ? { ...r, x: newX, y: newY } : r))
         );
 
+        const deltaLenM = ((newX - initial.x) * scale).toFixed(2);
+        const deltaHeightM = ((newY - initial.y) * scale).toFixed(2);
+        const deltaCm = `Δ (${Math.round((newX - initial.x) * scale * 100)}cm, ${Math.round((newY - initial.y) * scale * 100)}cm)`;
+
         setDragFeedback({
           active: true,
           roomLabel: getCleanRoomLabel(initial, language),
-          currentLengthM: `${(initial.w * scale).toFixed(1)}×${(initial.h * scale).toFixed(1)}`,
-          deltaM: `Δ (${((newX - initial.x) * scale).toFixed(1)}m, ${((newY - initial.y) * scale).toFixed(1)}m)`,
+          currentLengthM: `${(initial.w * scale).toFixed(1)}×${(initial.h * scale).toFixed(1)}m`,
+          currentLengthCm: `${Math.round(initial.w * scale * 100)}×${Math.round(initial.h * scale * 100)} cm`,
+          deltaM: `Δ (${deltaLenM}m, ${deltaHeightM}m)`,
+          deltaCm,
           roomAreaM2: (initial.w * initial.h * scale * scale).toFixed(1),
           isShared: false,
           hudX: newX * CELL_SIZE + PADDING + (initial.w * CELL_SIZE) / 2,
@@ -488,6 +673,9 @@ export default function FloorPlanCanvas({
             : guidelineH
             ? { orientation: 'horizontal', val: guidelineH }
             : undefined,
+          laserRay: laserGuide,
+          nodeMerged: isNodeMerged,
+          nodeMergePos,
         });
         return;
       }
@@ -497,8 +685,8 @@ export default function FloorPlanCanvas({
         const wall = state.wall;
         const EPSILON = 0.35; // Proximity threshold to detect shared walls
         const MIN_SIZE = 1.0; // Minimum room span in grid units
-        const SNAP_THRESHOLD = 0.22; // Alignment snap threshold
-        const scale = layout?.scale || 1.0;
+        let isNodeMerged = false;
+        let nodeMergePos: DragFeedback['nodeMergePos'] = undefined;
 
         const initLeft = initial.x;
         const initRight = initial.x + initial.w;
@@ -544,7 +732,7 @@ export default function FloorPlanCanvas({
 
         // 1. Right wall moved (expands/contracts horizontally to the right)
         if (wall === 'right' || wall === 'ne' || wall === 'se') {
-          let targetRight = initial.x + Math.max(MIN_SIZE, initial.w + deltaGridX);
+          let targetRight = initial.x + Math.max(MIN_SIZE, initial.w + effDeltaGridX);
 
           // Clamped by sharing neighbors so neighbors don't shrink below MIN_SIZE
           if (rightNeighbors.length > 0) {
@@ -552,13 +740,15 @@ export default function FloorPlanCanvas({
             targetRight = Math.min(targetRight, maxRight);
           }
 
-          // Alignment snap against all other room vertical wall edges
+          // Alignment snap & 15cm Node Merging against other room edges
           for (const other of state.initialAllRooms) {
             if (other.id === initial.id || rightNeighbors.some((n) => n.id === other.id)) continue;
             const edges = [other.x, other.x + other.w];
             for (const edge of edges) {
-              if (Math.abs(targetRight - edge) < SNAP_THRESHOLD) {
+              if (Math.abs(targetRight - edge) < SNAP_15CM) {
                 targetRight = edge;
+                isNodeMerged = true;
+                nodeMergePos = { x: edge * CELL_SIZE + PADDING, y: initTop * CELL_SIZE + PADDING, label: '15 cm Düğüm Birleşti (T/L-Snap)' };
                 snapGuideline = { orientation: 'vertical', val: edge * CELL_SIZE + PADDING };
                 break;
               }
@@ -571,7 +761,7 @@ export default function FloorPlanCanvas({
 
         // 2. Left wall moved (expands/contracts horizontally to the left)
         if (wall === 'left' || wall === 'nw' || wall === 'sw') {
-          let targetLeft = initial.x + deltaGridX;
+          let targetLeft = initial.x + effDeltaGridX;
           targetLeft = Math.min(targetLeft, initial.x + initial.w - MIN_SIZE);
           targetLeft = Math.max(0, targetLeft);
 
@@ -581,13 +771,15 @@ export default function FloorPlanCanvas({
             targetLeft = Math.max(targetLeft, minLeft);
           }
 
-          // Alignment snap against other room edges
+          // Alignment snap & 15cm Node Merging
           for (const other of state.initialAllRooms) {
             if (other.id === initial.id || leftNeighbors.some((n) => n.id === other.id)) continue;
             const edges = [other.x, other.x + other.w];
             for (const edge of edges) {
-              if (Math.abs(targetLeft - edge) < SNAP_THRESHOLD) {
+              if (Math.abs(targetLeft - edge) < SNAP_15CM) {
                 targetLeft = edge;
+                isNodeMerged = true;
+                nodeMergePos = { x: edge * CELL_SIZE + PADDING, y: initTop * CELL_SIZE + PADDING, label: '15 cm Düğüm Birleşti (T/L-Snap)' };
                 snapGuideline = { orientation: 'vertical', val: edge * CELL_SIZE + PADDING };
                 break;
               }
@@ -602,7 +794,7 @@ export default function FloorPlanCanvas({
 
         // 3. Bottom wall moved (expands/contracts vertically downwards)
         if (wall === 'bottom' || wall === 'se' || wall === 'sw') {
-          let targetBottom = initial.y + Math.max(MIN_SIZE, initial.h + deltaGridY);
+          let targetBottom = initial.y + Math.max(MIN_SIZE, initial.h + effDeltaGridY);
 
           // Clamped by sharing neighbors
           if (bottomNeighbors.length > 0) {
@@ -610,13 +802,15 @@ export default function FloorPlanCanvas({
             targetBottom = Math.min(targetBottom, maxBottom);
           }
 
-          // Alignment snap against other room edges
+          // Alignment snap & 15cm Node Merging
           for (const other of state.initialAllRooms) {
             if (other.id === initial.id || bottomNeighbors.some((n) => n.id === other.id)) continue;
             const edges = [other.y, other.y + other.h];
             for (const edge of edges) {
-              if (Math.abs(targetBottom - edge) < SNAP_THRESHOLD) {
+              if (Math.abs(targetBottom - edge) < SNAP_15CM) {
                 targetBottom = edge;
+                isNodeMerged = true;
+                nodeMergePos = { x: initLeft * CELL_SIZE + PADDING, y: edge * CELL_SIZE + PADDING, label: '15 cm Düğüm Birleşti (T/L-Snap)' };
                 snapGuideline = { orientation: 'horizontal', val: edge * CELL_SIZE + PADDING };
                 break;
               }
@@ -629,7 +823,7 @@ export default function FloorPlanCanvas({
 
         // 4. Top wall moved (expands/contracts vertically upwards)
         if (wall === 'top' || wall === 'nw' || wall === 'ne') {
-          let targetTop = initial.y + deltaGridY;
+          let targetTop = initial.y + effDeltaGridY;
           targetTop = Math.min(targetTop, initial.y + initial.h - MIN_SIZE);
           targetTop = Math.max(0, targetTop);
 
@@ -639,13 +833,15 @@ export default function FloorPlanCanvas({
             targetTop = Math.max(targetTop, minTop);
           }
 
-          // Alignment snap against other room edges
+          // Alignment snap & 15cm Node Merging
           for (const other of state.initialAllRooms) {
             if (other.id === initial.id || topNeighbors.some((n) => n.id === other.id)) continue;
             const edges = [other.y, other.y + other.h];
             for (const edge of edges) {
-              if (Math.abs(targetTop - edge) < SNAP_THRESHOLD) {
+              if (Math.abs(targetTop - edge) < SNAP_15CM) {
                 targetTop = edge;
+                isNodeMerged = true;
+                nodeMergePos = { x: initLeft * CELL_SIZE + PADDING, y: edge * CELL_SIZE + PADDING, label: '15 cm Düğüm Birleşti (T/L-Snap)' };
                 snapGuideline = { orientation: 'horizontal', val: edge * CELL_SIZE + PADDING };
                 break;
               }
@@ -709,19 +905,73 @@ export default function FloorPlanCanvas({
         const allNeighbors = [...rightNeighbors, ...leftNeighbors, ...bottomNeighbors, ...topNeighbors];
         const isHoriz = wall === 'top' || wall === 'bottom';
         const currentLenM = ((isHoriz ? newW : newH) * scale).toFixed(2);
+        const currentLenCm = `${Math.round(Number(currentLenM) * 100)} cm`;
         const initLenM = ((isHoriz ? initial.w : initial.h) * scale);
         const deltaVal = Number(currentLenM) - initLenM;
         const deltaStr = deltaVal >= 0 ? `+${deltaVal.toFixed(2)}` : deltaVal.toFixed(2);
+        const deltaCm = `${deltaVal >= 0 ? '+' : ''}${Math.round(deltaVal * 100)} cm`;
 
         const primaryNeighbor = allNeighbors[0];
         const primaryNeighborUpdated = primaryNeighbor ? updatedRooms.find((r) => r.id === primaryNeighbor.id) : undefined;
+
+        // Dynamic parallel CAD dimension line
+        const DIM_OFFSET = 26;
+        let dimLine: DragFeedback['dimensionLine'] = undefined;
+        const pxLeft = currLeft * CELL_SIZE + PADDING;
+        const pxRight = (currLeft + newW) * CELL_SIZE + PADDING;
+        const pxTop = currTop * CELL_SIZE + PADDING;
+        const pxBottom = (currTop + newH) * CELL_SIZE + PADDING;
+
+        if (wall === 'top') {
+          dimLine = {
+            x1: pxLeft,
+            y1: pxTop - DIM_OFFSET,
+            x2: pxRight,
+            y2: pxTop - DIM_OFFSET,
+            label: currentLenCm,
+            w1: [pxLeft, pxTop - DIM_OFFSET - 4, pxLeft, pxTop],
+            w2: [pxRight, pxTop - DIM_OFFSET - 4, pxRight, pxTop],
+          };
+        } else if (wall === 'bottom') {
+          dimLine = {
+            x1: pxLeft,
+            y1: pxBottom + DIM_OFFSET,
+            x2: pxRight,
+            y2: pxBottom + DIM_OFFSET,
+            label: currentLenCm,
+            w1: [pxLeft, pxBottom, pxLeft, pxBottom + DIM_OFFSET + 4],
+            w2: [pxRight, pxBottom, pxRight, pxBottom + DIM_OFFSET + 4],
+          };
+        } else if (wall === 'left') {
+          dimLine = {
+            x1: pxLeft - DIM_OFFSET,
+            y1: pxTop,
+            x2: pxLeft - DIM_OFFSET,
+            y2: pxBottom,
+            label: currentLenCm,
+            w1: [pxLeft - DIM_OFFSET - 4, pxTop, pxLeft, pxTop],
+            w2: [pxLeft - DIM_OFFSET - 4, pxBottom, pxLeft, pxBottom],
+          };
+        } else if (wall === 'right') {
+          dimLine = {
+            x1: pxRight + DIM_OFFSET,
+            y1: pxTop,
+            x2: pxRight + DIM_OFFSET,
+            y2: pxBottom,
+            label: currentLenCm,
+            w1: [pxRight, pxTop, pxRight + DIM_OFFSET + 4, pxTop],
+            w2: [pxRight, pxBottom, pxRight + DIM_OFFSET + 4, pxBottom],
+          };
+        }
 
         setDragFeedback({
           active: true,
           wall,
           roomLabel: getCleanRoomLabel(initial, language),
           currentLengthM: currentLenM,
+          currentLengthCm: currentLenCm,
           deltaM: deltaStr,
+          deltaCm,
           roomAreaM2: (newW * newH * scale * scale).toFixed(1),
           neighborLabel: primaryNeighbor ? getCleanRoomLabel(primaryNeighbor, language) : undefined,
           neighborAreaM2: primaryNeighborUpdated
@@ -735,6 +985,10 @@ export default function FloorPlanCanvas({
             ? currBottom * CELL_SIZE + PADDING + 32
             : (currTop + newH / 2) * CELL_SIZE + PADDING,
           guideline: snapGuideline,
+          dimensionLine: dimLine,
+          nodeMerged: isNodeMerged,
+          nodeMergePos: isNodeMerged ? nodeMergePos : undefined,
+          laserRay: laserGuide,
         });
         return;
       }
@@ -1135,30 +1389,77 @@ export default function FloorPlanCanvas({
           </button>
         </div>
 
-        {/* Center: Live Dimensions Bar */}
+        {/* Center: Live Dimensions Bar & Multi-Floor Switcher */}
         {layout && (
-          <div className="flex items-center gap-3 text-xs text-gray-600 hidden md:flex font-medium bg-gray-50 px-3 py-1 rounded-lg border border-gray-200">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              {t.editor.roomsCount(localRooms.length)}
-            </span>
-            <span>·</span>
-            <span className="font-semibold text-emerald-700">{layout.totalArea} m²</span>
-            {selectedRoom && (
-              <>
-                <span>·</span>
-                <span className="text-gray-900 font-bold bg-white px-2 py-0.5 rounded shadow-xs border border-gray-200">
-                  {getCleanRoomLabel(selectedRoom, language)}: {selectedRoom.w}m × {selectedRoom.h}m (
-                  {(
-                    selectedRoom.w *
-                    selectedRoom.h *
-                    (layout.scale || 1.2) *
-                    (layout.scale || 1.2)
-                  ).toFixed(1)}{' '}
-                  m²)
-                </span>
-              </>
+          <div className="flex items-center gap-2">
+            {/* Multi-floor Switcher */}
+            {layout.floors && layout.floors.length > 1 && (
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                {layout.floors.map((fl) => {
+                  const isActive = (layout.activeLevel ?? 0) === fl.level;
+                  return (
+                    <button
+                      key={fl.level}
+                      onClick={() => handleSwitchFloor(fl.level)}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all',
+                        isActive
+                          ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      )}
+                      title={`${fl.name} (${fl.elevation >= 0 ? `+${fl.elevation.toFixed(1)}` : fl.elevation.toFixed(1)}m)`}
+                    >
+                      <span>{fl.level === 0 ? '🏠' : fl.level === 1 ? '🛏️' : fl.level === -1 ? '📦' : '🏛️'}</span>
+                      <span>{fl.name}</span>
+                      <span className="text-[10px] text-slate-400 font-mono font-medium">
+                        ({fl.elevation >= 0 ? `+${fl.elevation.toFixed(1)}` : fl.elevation.toFixed(1)}m)
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {/* Ghost Trace Toggle Button (on upper floors) */}
+                {(layout.activeLevel ?? 0) > 0 && (
+                  <button
+                    onClick={() => setShowGhostTrace(!showGhostTrace)}
+                    className={cn(
+                      'flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all border ml-1',
+                      showGhostTrace
+                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                        : 'bg-white border-slate-200 text-slate-400'
+                    )}
+                    title={language === 'tr' ? 'Alt kat taşıyıcı duvarlarını %20 saydam referans olarak göster' : 'Show lower floor structural walls at 20% opacity'}
+                  >
+                    <span>👁️</span>
+                    <span className="hidden lg:inline">{language === 'tr' ? 'Hayalet İz:' : 'Ghost:'} {showGhostTrace ? (language === 'tr' ? 'Açık' : 'On') : (language === 'tr' ? 'Kapalı' : 'Off')}</span>
+                  </button>
+                )}
+              </div>
             )}
+
+            <div className="flex items-center gap-3 text-xs text-gray-600 hidden md:flex font-medium bg-gray-50 px-3 py-1 rounded-lg border border-gray-200">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                {t.editor.roomsCount(localRooms.length)}
+              </span>
+              <span>·</span>
+              <span className="font-semibold text-emerald-700">{layout.totalArea} m²</span>
+              {selectedRoom && (
+                <>
+                  <span>·</span>
+                  <span className="text-gray-900 font-bold bg-white px-2 py-0.5 rounded shadow-xs border border-gray-200">
+                    {getCleanRoomLabel(selectedRoom, language)}: {selectedRoom.w}m × {selectedRoom.h}m (
+                    {(
+                      selectedRoom.w *
+                      selectedRoom.h *
+                      (layout.scale || 1.2) *
+                      (layout.scale || 1.2)
+                    ).toFixed(1)}{' '}
+                    m²)
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -1249,6 +1550,77 @@ export default function FloorPlanCanvas({
                   strokeDasharray="2,3"
                 />
               ))}
+
+              {/* Ghost Trace Reference from Floor Below (%20 Opacity CAD Overlay) */}
+              {showGhostTrace &&
+                (layout?.activeLevel ?? 0) > 0 &&
+                (() => {
+                  const currentFloors = layout?.floors || [];
+                  const lowerFloor = currentFloors.find(
+                    (f) => f.level === (layout!.activeLevel! - 1)
+                  );
+                  if (!lowerFloor || !lowerFloor.rooms || lowerFloor.rooms.length === 0) return null;
+
+                  return (
+                    <g className="ghost-trace-overlay pointer-events-none" opacity={0.22}>
+                      {lowerFloor.rooms.map((gr) => {
+                        const gx = gr.x * CELL_SIZE + PADDING;
+                        const gy = gr.y * CELL_SIZE + PADDING;
+                        const gw = gr.w * CELL_SIZE;
+                        const gh = gr.h * CELL_SIZE;
+                        const gPoly = gr.polygon && gr.polygon.length >= 3;
+
+                        if (gPoly) {
+                          const pts = gr
+                            .polygon!.map(
+                              ([px, py]) =>
+                                `${px * CELL_SIZE + PADDING},${py * CELL_SIZE + PADDING}`
+                            )
+                            .join(' ');
+                          return (
+                            <polygon
+                              key={`ghost-${gr.id}`}
+                              points={pts}
+                              fill="#64748B"
+                              fillOpacity={0.15}
+                              stroke="#334155"
+                              strokeWidth={2}
+                              strokeDasharray="4,4"
+                            />
+                          );
+                        }
+
+                        return (
+                          <g key={`ghost-${gr.id}`}>
+                            <rect
+                              x={gx}
+                              y={gy}
+                              width={gw}
+                              height={gh}
+                              fill="#64748B"
+                              fillOpacity={0.12}
+                              stroke="#334155"
+                              strokeWidth={2}
+                              strokeDasharray="4,4"
+                              rx={2}
+                            />
+                            <text
+                              x={gx + gw / 2}
+                              y={gy + 14}
+                              textAnchor="middle"
+                              fontFamily="Inter, system-ui, sans-serif"
+                              fontSize="8.5"
+                              fontWeight="bold"
+                              fill="#475569"
+                            >
+                              ↓ {getCleanRoomLabel(gr, language)}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                })()}
 
               {/* Render Each Room */}
               {localRooms.map((room) => {
@@ -1862,6 +2234,128 @@ export default function FloorPlanCanvas({
                 );
               })()}
 
+              {/* Laser / Ortho Guideline Ray (0°, 45°, 90°) */}
+              {dragFeedback?.laserRay && (
+                <g className="laser-guideline-ray pointer-events-none">
+                  <line
+                    x1={dragFeedback.laserRay.x1}
+                    y1={dragFeedback.laserRay.y1}
+                    x2={dragFeedback.laserRay.x2}
+                    y2={dragFeedback.laserRay.y2}
+                    stroke="#06B6D4"
+                    strokeWidth={1.8}
+                    strokeDasharray="6,4"
+                  />
+                  <g
+                    transform={`translate(${(dragFeedback.laserRay.x1 + dragFeedback.laserRay.x2) / 2}, ${(dragFeedback.laserRay.y1 + dragFeedback.laserRay.y2) / 2})`}
+                  >
+                    <rect x="-48" y="-18" width="96" height="18" rx="4" fill="#0891B2" />
+                    <text
+                      x="0"
+                      y="-5"
+                      textAnchor="middle"
+                      fill="#FFFFFF"
+                      fontFamily="Inter, system-ui, sans-serif"
+                      fontSize="9"
+                      fontWeight="bold"
+                    >
+                      ⚡ {dragFeedback.laserRay.label}
+                    </text>
+                  </g>
+                </g>
+              )}
+
+              {/* Dynamic Parallel CAD Dimension Line with Oblique Ticks (cm) */}
+              {dragFeedback?.dimensionLine && (
+                <g className="cad-parallel-dimension pointer-events-none">
+                  {/* Witness Extension Lines */}
+                  <line
+                    x1={dragFeedback.dimensionLine.w1[0]}
+                    y1={dragFeedback.dimensionLine.w1[1]}
+                    x2={dragFeedback.dimensionLine.w1[2]}
+                    y2={dragFeedback.dimensionLine.w1[3]}
+                    stroke="#0284C7"
+                    strokeWidth={1.2}
+                    strokeDasharray="2,2"
+                  />
+                  <line
+                    x1={dragFeedback.dimensionLine.w2[0]}
+                    y1={dragFeedback.dimensionLine.w2[1]}
+                    x2={dragFeedback.dimensionLine.w2[2]}
+                    y2={dragFeedback.dimensionLine.w2[3]}
+                    stroke="#0284C7"
+                    strokeWidth={1.2}
+                    strokeDasharray="2,2"
+                  />
+                  {/* Main Parallel Dimension Line */}
+                  <line
+                    x1={dragFeedback.dimensionLine.x1}
+                    y1={dragFeedback.dimensionLine.y1}
+                    x2={dragFeedback.dimensionLine.x2}
+                    y2={dragFeedback.dimensionLine.y2}
+                    stroke="#0284C7"
+                    strokeWidth={1.8}
+                  />
+                  {/* 45° Architectural Ticks */}
+                  <line
+                    x1={dragFeedback.dimensionLine.x1 - 4}
+                    y1={dragFeedback.dimensionLine.y1 + 4}
+                    x2={dragFeedback.dimensionLine.x1 + 4}
+                    y2={dragFeedback.dimensionLine.y1 - 4}
+                    stroke="#0284C7"
+                    strokeWidth={2.5}
+                  />
+                  <line
+                    x1={dragFeedback.dimensionLine.x2 - 4}
+                    y1={dragFeedback.dimensionLine.y2 + 4}
+                    x2={dragFeedback.dimensionLine.x2 + 4}
+                    y2={dragFeedback.dimensionLine.y2 - 4}
+                    stroke="#0284C7"
+                    strokeWidth={2.5}
+                  />
+                  {/* Centered Dimension Label in cm */}
+                  <g
+                    transform={`translate(${(dragFeedback.dimensionLine.x1 + dragFeedback.dimensionLine.x2) / 2}, ${(dragFeedback.dimensionLine.y1 + dragFeedback.dimensionLine.y2) / 2})`}
+                  >
+                    <rect x="-34" y="-10" width="68" height="20" rx="4" fill="#0284C7" />
+                    <text
+                      x="0"
+                      y="4"
+                      textAnchor="middle"
+                      fill="#FFFFFF"
+                      fontFamily="JetBrains Mono, monospace, sans-serif"
+                      fontSize="10"
+                      fontWeight="800"
+                    >
+                      {dragFeedback.dimensionLine.label}
+                    </text>
+                  </g>
+                </g>
+              )}
+
+              {/* 15 cm Node Merging Magnet Indicator Dot */}
+              {dragFeedback?.nodeMergePos && (
+                <g
+                  transform={`translate(${dragFeedback.nodeMergePos.x}, ${dragFeedback.nodeMergePos.y})`}
+                  className="pointer-events-none animate-pulse"
+                >
+                  <circle r="10" fill="#10B981" fillOpacity="0.3" />
+                  <circle r="4.5" fill="#10B981" stroke="#FFFFFF" strokeWidth="2" />
+                  <rect x="-65" y="-24" width="130" height="18" rx="4" fill="#065F46" fillOpacity="0.95" />
+                  <text
+                    x="0"
+                    y="-12"
+                    textAnchor="middle"
+                    fill="#FFFFFF"
+                    fontSize="8.5"
+                    fontWeight="bold"
+                    fontFamily="Inter, system-ui"
+                  >
+                    🟢 {dragFeedback.nodeMergePos.label}
+                  </text>
+                </g>
+              )}
+
               {/* Floating Live CAD Measurement HUD Badge */}
               {dragFeedback?.active && (
                 <g
@@ -1869,9 +2363,9 @@ export default function FloorPlanCanvas({
                   transform={`translate(${Math.max(120, Math.min(svgWidth - 120, dragFeedback.hudX))}, ${Math.max(45, Math.min(svgHeight - 45, dragFeedback.hudY))})`}
                 >
                   <rect
-                    x={-110}
+                    x={-120}
                     y={dragFeedback.isShared ? -42 : -32}
-                    width={220}
+                    width={240}
                     height={dragFeedback.isShared ? 84 : 64}
                     rx={10}
                     fill="#0F172A"
@@ -1891,11 +2385,11 @@ export default function FloorPlanCanvas({
                     fontFamily="Inter, system-ui, sans-serif"
                   >
                     <tspan fill={dragFeedback.isShared ? '#A5B4FC' : '#38BDF8'}>
-                      {dragFeedback.currentLengthM}m
+                      {dragFeedback.currentLengthCm ? `${dragFeedback.currentLengthCm} (${dragFeedback.currentLengthM}m)` : `${dragFeedback.currentLengthM}m`}
                     </tspan>
                     <tspan fill="#94A3B8" fontSize="11"> | </tspan>
                     <tspan fill={dragFeedback.deltaM.startsWith('+') ? '#34D399' : '#FBBF24'} fontSize="11" fontWeight="600">
-                      {dragFeedback.deltaM}
+                      {dragFeedback.deltaCm || dragFeedback.deltaM}
                     </tspan>
                   </text>
 

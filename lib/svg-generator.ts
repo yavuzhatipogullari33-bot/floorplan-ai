@@ -24,7 +24,10 @@ export type RoomType =
   | 'balcony'
   | 'storage'
   | 'laundry'
-  | 'office';
+  | 'office'
+  | 'staircase'
+  | 'void'
+  | 'shaft';
 
 export interface DoorPlacement {
   id?: string;
@@ -49,12 +52,24 @@ export interface FurniturePlacement {
   rotation?: number;
 }
 
+export interface FloorLevel {
+  level: number; // 0: Zemin Kat, 1: 1. Kat, 2: 2. Kat, -1: Bodrum Kat
+  name: string; // 'Zemin Kat', '1. Kat', '2. Kat', 'Bodrum Kat', 'Çatı Katı'
+  elevation: number; // Kot metre: 0.0, 3.0, 6.0, -2.80
+  rooms: RoomLayout[];
+  totalArea?: number;
+  voids?: Array<{ x: number; y: number; w: number; h: number; label?: string }>;
+  svg?: string;
+}
+
 export interface FloorPlanLayout {
   rooms: RoomLayout[];
   totalArea: number;
   gridWidth: number;
   gridHeight: number;
   scale: number; // meters per grid unit
+  floors?: FloorLevel[]; // multi-floor levels
+  activeLevel?: number; // active floor level index/number (default: 0)
 }
 
 // Architectural color palette - subtle blueprint / architectural rendering tones
@@ -70,6 +85,9 @@ export const ROOM_COLORS: Record<RoomType, { fill: string; stroke: string; label
   storage: { fill: '#FAF5FF', stroke: '#7E22CE', label: 'Storage', accent: '#9333EA' },
   laundry: { fill: '#FFF1F2', stroke: '#E11D48', label: 'Laundry', accent: '#E11D48' },
   office: { fill: '#F8FAFC', stroke: '#334155', label: 'Office', accent: '#6366F1' },
+  staircase: { fill: '#F1F5F9', stroke: '#1E293B', label: 'Staircase', accent: '#475569' },
+  void: { fill: '#F8FAFC', stroke: '#94A3B8', label: 'Void / Atrium', accent: '#94A3B8' },
+  shaft: { fill: '#F1F5F9', stroke: '#475569', label: 'Service Shaft', accent: '#64748B' },
 };
 
 // Pure Single-Language Dictionaries
@@ -85,6 +103,9 @@ export const ROOM_LABELS_TR: Record<RoomType, string> = {
   storage: 'Kiler / Depo',
   laundry: 'Çamaşır Odası',
   office: 'Çalışma Odası',
+  staircase: 'Merdiven Kovası',
+  void: 'Galeri Boşluğu',
+  shaft: 'Tesisat Şaftı',
 };
 
 export const ROOM_LABELS_EN: Record<RoomType, string> = {
@@ -99,6 +120,9 @@ export const ROOM_LABELS_EN: Record<RoomType, string> = {
   storage: 'Pantry / Storage',
   laundry: 'Laundry Room',
   office: 'Home Office',
+  staircase: 'Staircase Core',
+  void: 'Atrium / Void',
+  shaft: 'Service Shaft',
 };
 
 export function getCleanRoomLabel(room: RoomLayout, lang: 'tr' | 'en' = 'tr'): string {
@@ -361,6 +385,64 @@ function renderArchitecturalFurniture(
       break;
     }
 
+    case 'staircase': {
+      // Architectural Staircase: Treads, Central Walkline, Direction Arrow, Handrail
+      const numTreads = Math.max(6, Math.min(14, Math.floor(h / 14)));
+      const treadStep = (h - 16) / numTreads;
+      const midX = x + w / 2;
+
+      svg += `
+        <!-- Staircase Flight Border / Well -->
+        <rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" rx="2" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.2"/>
+        <!-- Central Handrail / Spine Split -->
+        <line x1="${midX}" y1="${y + 8}" x2="${midX}" y2="${y + h - 8}" stroke="#64748B" stroke-width="1.5"/>
+      `;
+
+      // Draw treads
+      for (let i = 1; i < numTreads; i++) {
+        const ty = y + 8 + i * treadStep;
+        svg += `
+          <line x1="${x + 6}" y1="${ty}" x2="${midX - 2}" y2="${ty}" stroke="#94A3B8" stroke-width="0.9"/>
+          <line x1="${midX + 2}" y1="${ty}" x2="${x + w - 6}" y2="${ty}" stroke="#94A3B8" stroke-width="0.9"/>
+        `;
+      }
+
+      // Directional Walkline & Arrow
+      const arrowY = y + 16;
+      svg += `
+        <!-- Walkline Path with Start Circle & Arrow Head -->
+        <circle cx="${midX - (w * 0.22)}" cy="${y + h - 18}" r="3" fill="#0284C7"/>
+        <path d="M${midX - (w * 0.22)},${y + h - 18} L${midX - (w * 0.22)},${arrowY} L${midX - (w * 0.22) - 4},${arrowY + 7} M${midX - (w * 0.22)},${arrowY} L${midX - (w * 0.22) + 4},${arrowY + 7}" stroke="#0284C7" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        <text x="${midX - (w * 0.22) + 8}" y="${arrowY + 12}" font-family="Inter, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#0284C7">ÇIKIŞ / UP</text>
+      `;
+      break;
+    }
+
+    case 'void': {
+      // Architectural Double-Height Void / Atrium (X-Hatch & Dashed Outline)
+      svg += `
+        <!-- Void Boundary Line -->
+        <rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" fill="none" stroke="#94A3B8" stroke-width="1.2" stroke-dasharray="6,4"/>
+        <!-- Corner-to-corner Diagonal Void Crosses -->
+        <line x1="${x + 6}" y1="${y + 6}" x2="${x + w - 6}" y2="${y + h - 6}" stroke="#CBD5E1" stroke-width="1.2" stroke-dasharray="6,4"/>
+        <line x1="${x + w - 6}" y1="${y + 6}" x2="${x + 6}" y2="${y + h - 6}" stroke="#CBD5E1" stroke-width="1.2" stroke-dasharray="6,4"/>
+        <!-- Void Architectural Stamp Badge -->
+        <rect x="${x + w / 2 - 50}" y="${y + h / 2 - 12}" width="100" height="24" rx="4" fill="#FFFFFF" fill-opacity="0.9" stroke="#94A3B8" stroke-width="0.8"/>
+        <text x="${x + w / 2}" y="${y + h / 2 + 3}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="9" font-weight="700" fill="#64748B" letter-spacing="0.5">GALERİ BOŞLUĞU</text>
+      `;
+      break;
+    }
+
+    case 'shaft': {
+      // Vertical Plumbing & Mechanical Shaft (X Hatch)
+      svg += `
+        <rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" fill="#F1F5F9" stroke="#475569" stroke-width="1.2"/>
+        <line x1="${x + 4}" y1="${y + 4}" x2="${x + w - 4}" y2="${y + h - 4}" stroke="#64748B" stroke-width="1"/>
+        <line x1="${x + w - 4}" y1="${y + 4}" x2="${x + 4}" y2="${y + h - 4}" stroke="#64748B" stroke-width="1"/>
+      `;
+      break;
+    }
+
     default:
       break;
   }
@@ -565,13 +647,47 @@ function renderStructuralColumns(layout: FloorPlanLayout): string {
   return svg;
 }
 
+export interface GenerateSVGOptions {
+  ghostRooms?: RoomLayout[];
+  showGhostTrace?: boolean;
+  activeLevel?: number;
+  floorName?: string;
+  elevation?: number;
+}
+
 /**
  * MAIN GENERATE SVG FUNCTION
  */
-export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): string {
+export function generateSVG(
+  layout: FloorPlanLayout,
+  lang: 'tr' | 'en' = 'tr',
+  options?: GenerateSVGOptions
+): string {
   const { rooms, gridWidth, gridHeight, scale } = layout;
   const svgWidth = Math.max(gridWidth * CELL_SIZE + PADDING * 2 + 70, 840);
   const svgHeight = Math.max(gridHeight * CELL_SIZE + PADDING * 2 + 90, 620);
+
+  // 0. Render Ghost Trace Layer (Alt Kat Duvar İzi - %20 opacity)
+  let ghostSvg = '';
+  if (options?.showGhostTrace !== false && options?.ghostRooms && options.ghostRooms.length > 0) {
+    ghostSvg += `\n    <!-- GHOST TRACE LAYER (%20 Opacity Reference from Floor Below) -->\n    <g class="ghost-trace-layer" opacity="0.22" pointer-events="none">\n`;
+    for (const gr of options.ghostRooms) {
+      const gx = gr.x * CELL_SIZE + PADDING;
+      const gy = gr.y * CELL_SIZE + PADDING;
+      const gw = gr.w * CELL_SIZE;
+      const gh = gr.h * CELL_SIZE;
+      const gPoly = gr.polygon && gr.polygon.length >= 3;
+
+      if (gPoly) {
+        const pts = gr.polygon!.map(([px, py]) => `${px * CELL_SIZE + PADDING},${py * CELL_SIZE + PADDING}`).join(' ');
+        ghostSvg += `      <polygon points="${pts}" fill="#64748B" fill-opacity="0.15" stroke="#475569" stroke-width="1.8" stroke-dasharray="4,4"/>\n`;
+      } else {
+        ghostSvg += `      <rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="#64748B" fill-opacity="0.12" stroke="#475569" stroke-width="1.8" stroke-dasharray="4,4" rx="2"/>\n`;
+        ghostSvg += `      <text x="${gx + gw / 2}" y="${gy + 14}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8" font-weight="600" fill="#475569">↓ ${getCleanRoomLabel(gr, lang)}</text>\n`;
+      }
+    }
+    ghostSvg += `    </g>\n`;
+  }
 
   let roomsSvg = '';
   let furnitureSvg = '';
@@ -770,6 +886,9 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     <!-- Dimension Lines (Kot ve Ölçülendirme Çizgileri) -->
     ${dimensionLines}
 
+    <!-- Ghost Trace Reference from Floor Below (Hayalet Katman) -->
+    ${ghostSvg}
+
     <!-- Room Walls & Floors (Zemin ve Duvarlar) -->
     ${roomsSvg}
 
@@ -788,6 +907,100 @@ export function generateSVG(layout: FloorPlanLayout, lang: 'tr' | 'en' = 'tr'): 
     <!-- Compass -->
     ${compass}
   </svg>`;
+}
+
+/**
+ * Helper: Retrieves the active floor level from a FloorPlanLayout.
+ * Falls back to wrapping single-floor rooms if floors array is not present.
+ */
+export function getActiveFloor(layout: FloorPlanLayout): FloorLevel {
+  const activeLevel = layout.activeLevel ?? 0;
+  if (layout.floors && layout.floors.length > 0) {
+    const found = layout.floors.find((f) => f.level === activeLevel);
+    if (found) return found;
+    return layout.floors[0];
+  }
+  return {
+    level: 0,
+    name: 'Zemin Kat',
+    elevation: 0.0,
+    rooms: layout.rooms || [],
+    totalArea: layout.totalArea,
+  };
+}
+
+/**
+ * Helper: Sets the active floor level in a FloorPlanLayout.
+ */
+export function setActiveFloor(layout: FloorPlanLayout, level: number): FloorPlanLayout {
+  const currentFloors = layout.floors || [
+    {
+      level: 0,
+      name: 'Zemin Kat',
+      elevation: 0.0,
+      rooms: layout.rooms || [],
+      totalArea: layout.totalArea,
+    },
+  ];
+
+  const targetFloor = currentFloors.find((f) => f.level === level) || currentFloors[0];
+
+  return {
+    ...layout,
+    activeLevel: targetFloor.level,
+    rooms: targetFloor.rooms,
+    totalArea: targetFloor.totalArea || layout.totalArea,
+    floors: currentFloors,
+  };
+}
+
+/**
+ * Helper: Updates rooms for a specific floor level in a multi-floor layout.
+ */
+export function updateFloorRooms(
+  layout: FloorPlanLayout,
+  level: number,
+  updatedRooms: RoomLayout[]
+): FloorPlanLayout {
+  const currentFloors = layout.floors ? [...layout.floors] : [
+    {
+      level: 0,
+      name: 'Zemin Kat',
+      elevation: 0.0,
+      rooms: layout.rooms || [],
+      totalArea: layout.totalArea,
+    },
+  ];
+
+  const floorIdx = currentFloors.findIndex((f) => f.level === level);
+  const scale = layout.scale || 1.2;
+  const floorArea = Math.round(
+    updatedRooms.reduce((acc, r) => acc + r.w * r.h * scale * scale, 0)
+  );
+
+  if (floorIdx !== -1) {
+    currentFloors[floorIdx] = {
+      ...currentFloors[floorIdx],
+      rooms: updatedRooms,
+      totalArea: floorArea,
+    };
+  } else {
+    currentFloors.push({
+      level,
+      name: level === 0 ? 'Zemin Kat' : `${level}. Kat`,
+      elevation: level * 3.0,
+      rooms: updatedRooms,
+      totalArea: floorArea,
+    });
+  }
+
+  const isActive = (layout.activeLevel ?? 0) === level;
+  return {
+    ...layout,
+    floors: currentFloors,
+    rooms: isActive ? updatedRooms : layout.rooms,
+    totalArea: currentFloors.reduce((acc, f) => acc + (f.totalArea || 0), 0),
+  };
 }
 
 /**
